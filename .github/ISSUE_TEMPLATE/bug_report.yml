@@ -1,0 +1,59 @@
+name: Bug Report
+description: Something is not working correctly
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: Thanks for taking the time to report a bug!
+
+  - type: dropdown
+    id: discord_build
+    attributes:
+      label: Discord build
+      options:
+        - Discord (stable)
+        - Discord PTB
+        - Discord Canary
+    validations:
+      required: true
+
+  - type: input
+    id: nvda_version
+    attributes:
+      label: NVDA version
+      placeholder: "e.g. 2024.1"
+    validations:
+      required: true
+
+  - type: input
+    id: addon_version
+    attributes:
+      label: Add-on version
+      placeholder: "e.g. 1.0.0"
+    validations:
+      required: true
+
+  - type: textarea
+    id: description
+    attributes:
+      label: What happened?
+      description: Describe the bug. What did you expect, and what actually happened?
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Open Discord
+        2. ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: NVDA log (optional)
+      description: Paste relevant lines from the NVDA log (Help > View Log). Set log level to Debug for more detail.
+      render: text
