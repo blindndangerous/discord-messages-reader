@@ -1,0 +1,17 @@
+# Distribution builds
+dist/
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+
+# Pytest cache
+.pytest_cache/
+
+# Old addon file at project root (replaced by dist/)
+*.nvda-addon
+
+# Editor / OS
+.DS_Store
+Thumbs.db
