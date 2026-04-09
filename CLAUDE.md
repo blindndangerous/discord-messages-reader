@@ -26,12 +26,12 @@ pytest                      # 68 tests, all should pass
 ```
 
 Pytest is installed at:
-`C:\Users\blind\AppData\Roaming\Python\Python313\Scripts\pytest.exe`
+`C:\Users\<username>\AppData\Roaming\Python\Python313\Scripts\pytest.exe`
 
 ## Installed Location (for rapid iteration)
 
 ```
-C:\Users\blind\AppData\Roaming\nvda\addons\discord_messages_reader\appModules\discord\__init__.py
+C:\Users\<username>\AppData\Roaming\nvda\addons\discord_messages_reader\appModules\discord\__init__.py
 ```
 
 After editing, deploy with:

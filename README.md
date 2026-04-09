@@ -63,6 +63,7 @@ pytest
 
 MIT License. See [LICENSE](LICENSE) for details.
 
-## Author
+## Authors
 
-Michael Wassel — [github.com/blindndangerous](https://github.com/blindndangerous)
+- **[blindndangerous](https://github.com/blindndangerous)** — concept, requirements, and testing
+- **[Claude Sonnet](https://claude.ai)** (Anthropic) — implementation and architecture
