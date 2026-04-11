@@ -63,6 +63,10 @@ def _install_stubs():
     m = _stub('api')
     m.getForegroundObject = MagicMock(return_value=None)
 
+    # core
+    m = _stub('core')
+    m.callLater = MagicMock(return_value=MagicMock())
+
     # NVDAObjects (imported at module level in original; unused after cleanup
     # but kept in case of import-time side effects from other addons)
     _stub('NVDAObjects')
@@ -82,8 +86,8 @@ from unittest.mock import patch
 def app_module():
     """Return a live AppModule instance with Win32 and wx calls stubbed out."""
     with patch('ctypes.windll') as mock_windll, \
-         patch('wx.CallLater', return_value=MagicMock()) as _mock_timer, \
-         patch('wx.CallAfter') as _mock_after:
+         patch('wx.CallAfter') as _mock_after, \
+         patch('core.callLater', return_value=MagicMock()) as _mock_timer:
         mock_windll.user32.SetWinEventHook.return_value = 0xDEAD
         mock_windll.user32.UnhookWinEvent.return_value = True
 

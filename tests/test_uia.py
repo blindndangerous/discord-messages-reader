@@ -237,3 +237,80 @@ class TestHwndFallback:
 
         app_module._getLatestMessageViaUIA()
         assert app_module._discordHwnd == 0xABCD
+
+
+# ---------------------------------------------------------------------------
+# Caching of _getMsgListViaUIA
+# ---------------------------------------------------------------------------
+
+class TestGetMsgListViaUIACache:
+    def test_cache_miss_populates_cache(self, uia_ctx):
+        app_module, uia = uia_ctx
+        root = MagicMock()
+        uia.ElementFromHandle.return_value = root
+        uia.CreatePropertyCondition.return_value = MagicMock()
+
+        msg_list = _make_elem("Messages in #general")
+        root.FindAll.return_value = _make_elem_array(msg_list)
+
+        assert app_module._cachedMsgList is None
+        result = app_module._getMsgListViaUIA(uia)
+        assert result is msg_list
+        assert app_module._cachedMsgList is msg_list
+        assert app_module._cachedMsgListName == "Messages in #general"
+        uia.ElementFromHandle.assert_called_once()
+
+    def test_cache_hit_bypasses_tree_walk(self, uia_ctx):
+        app_module, uia = uia_ctx
+        cached_elem = _make_elem("Messages in #general")
+        app_module._cachedMsgList = cached_elem
+        app_module._cachedMsgListName = "Messages in #general"
+
+        result = app_module._getMsgListViaUIA(uia)
+        assert result is cached_elem
+        # Should not walk the tree
+        uia.ElementFromHandle.assert_not_called()
+
+    def test_cache_invalidation_on_error(self, uia_ctx):
+        app_module, uia = uia_ctx
+
+        # Setup broken cached element
+        broken_elem = MagicMock()
+        broken_elem.GetCurrentPropertyValue.side_effect = Exception("COM error")
+        app_module._cachedMsgList = broken_elem
+        app_module._cachedMsgListName = "Messages in #general"
+
+        # Setup fresh tree walk
+        root = MagicMock()
+        uia.ElementFromHandle.return_value = root
+        uia.CreatePropertyCondition.return_value = MagicMock()
+        new_msg_list = _make_elem("Messages in #general")
+        root.FindAll.return_value = _make_elem_array(new_msg_list)
+
+        result = app_module._getMsgListViaUIA(uia)
+        assert result is new_msg_list
+        assert app_module._cachedMsgList is new_msg_list
+        # Tree walk must have occurred
+        uia.ElementFromHandle.assert_called_once()
+
+    def test_cache_invalidation_on_name_mismatch(self, uia_ctx):
+        app_module, uia = uia_ctx
+
+        # Setup old cached element (channel switched)
+        stale_elem = _make_elem("Messages in #random")
+        app_module._cachedMsgList = stale_elem
+        app_module._cachedMsgListName = "Messages in #general"
+
+        # Setup fresh tree walk
+        root = MagicMock()
+        uia.ElementFromHandle.return_value = root
+        uia.CreatePropertyCondition.return_value = MagicMock()
+        new_msg_list = _make_elem("Messages in #random")
+        root.FindAll.return_value = _make_elem_array(new_msg_list)
+
+        result = app_module._getMsgListViaUIA(uia)
+        assert result is new_msg_list
+        assert app_module._cachedMsgList is new_msg_list
+        assert app_module._cachedMsgListName == "Messages in #random"
+        # Tree walk must have occurred
+        uia.ElementFromHandle.assert_called_once()

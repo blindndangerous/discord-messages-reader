@@ -17,8 +17,7 @@ from unittest.mock import MagicMock, patch
 class TestLifecycle:
     def test_init_registers_winevent_hook(self):
         with patch('ctypes.windll') as mock_windll, \
-             patch('wx.CallLater', return_value=MagicMock()), \
-             patch('wx.CallAfter'):
+             patch('core.callLater', return_value=MagicMock()):
             mock_windll.user32.SetWinEventHook.return_value = 0xBEEF
             from discord import AppModule
             m = AppModule()
@@ -29,8 +28,7 @@ class TestLifecycle:
 
     def test_init_starts_poll_timer(self):
         with patch('ctypes.windll') as mock_windll, \
-             patch('wx.CallLater', return_value=MagicMock()) as mock_timer, \
-             patch('wx.CallAfter'):
+             patch('core.callLater', return_value=MagicMock()) as mock_timer:
             mock_windll.user32.SetWinEventHook.return_value = 0xBEEF
             from discord import AppModule
             m = AppModule()
@@ -136,18 +134,18 @@ class TestWinEventCallback:
         assert app_module._lastHookTime >= before
 
     def test_triggers_immediate_uia_read_when_not_debounced(self, app_module):
-        wx = sys.modules['wx']
-        wx.CallAfter.reset_mock()
+        core = sys.modules['core']
+        core.callLater.reset_mock()
         app_module._lastUiaRead = 0.0  # no recent read — debounce inactive
         app_module._winEventCallback(None, None, 0xABC, None, None, None, None)
-        wx.CallAfter.assert_called_once_with(app_module._uiaRead)
+        core.callLater.assert_called_once_with(0, app_module._uiaRead)
 
     def test_debounce_suppresses_rapid_winevent_triggers(self, app_module):
-        wx = sys.modules['wx']
-        wx.CallAfter.reset_mock()
+        core = sys.modules['core']
+        core.callLater.reset_mock()
         app_module._lastUiaRead = time.time()  # read just ran
         app_module._winEventCallback(None, None, 0xABC, None, None, None, None)
-        wx.CallAfter.assert_not_called()
+        core.callLater.assert_not_called()
 
 
 # ---------------------------------------------------------------------------

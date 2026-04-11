@@ -207,10 +207,18 @@ class AppModule(appModuleHandler.AppModule):
 				return None
 
 			walker = uia.RawViewWalker
+			child = walker.GetLastChildElement(msgList)
+
+			# If the list is cached but detached, it will have no children.
+			if not child and self._cachedMsgList is not None:
+				self._cachedMsgList = None
+				self._cachedMsgListName = None
+				msgList = self._getMsgListViaUIA(uia)
+				if not msgList:
+					return None
+				child = walker.GetLastChildElement(msgList)
 
 			# Walk backward from the last child; message containers often have
-			# an empty aggregate name — content lives in grandchildren.
-			child = walker.GetLastChildElement(msgList)
 			for _ in range(10):
 				if not child:
 					break
@@ -313,8 +321,18 @@ class AppModule(appModuleHandler.AppModule):
 				return []
 
 			walker = uia.RawViewWalker
-			candidates = []
 			child = walker.GetLastChildElement(msgList)
+
+			# If the list is cached but detached, it will have no children.
+			if not child and self._cachedMsgList is not None:
+				self._cachedMsgList = None
+				self._cachedMsgListName = None
+				msgList = self._getMsgListViaUIA(uia)
+				if not msgList:
+					return []
+				child = walker.GetLastChildElement(msgList)
+
+			candidates = []
 			# Over-collect to account for non-message items (date separators, etc.)
 			limit = count * 4
 			iterations = 0
