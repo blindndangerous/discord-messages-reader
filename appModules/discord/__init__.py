@@ -54,8 +54,10 @@ _TIMESTAMP_RE = re.compile(r'^\d{1,2}:\d{2}\s*(AM|PM)?$', re.IGNORECASE)
 
 class AppModule(appModuleHandler.AppModule):
     disableBrowseModeByDefault = True
+    scriptCategory = "Discord Messages Reader"
 
     _lastText: str = ""
+    _announceEnabled: bool = True
     _lastHookTime: float = 0.0   # time of last IAccessible nameChange — for valueChange suppression
     _lastUiaRead: float = 0.0    # time of last completed UIA read — for WinEvent debounce
     _discordHwnd: int = 0        # hwnd learned from first WinEvent; used for UIA root lookup
@@ -243,6 +245,8 @@ class AppModule(appModuleHandler.AppModule):
         if text == self._lastText:
             return
         self._lastText = text
+        if not self._announceEnabled:
+            return
         log.debug("DiscordMessages: announcing %r" % text[:80])
         self._doAnnounce(text)
 
@@ -259,6 +263,174 @@ class AppModule(appModuleHandler.AppModule):
             formatted = text
         log.debug("DiscordMessages: SPEAKING %r" % formatted[:120])
         speech.speak([formatted], priority=speech.Spri.NOW)
+
+    # ------------------------------------------------------------------ #
+    # History reading — Alt+1 through Alt+0                              #
+    # ------------------------------------------------------------------ #
+
+    def _isValidMessage(self, name):
+        """Return True if *name* looks like a real chat message."""
+        lower = name.lower()
+        if any(name.endswith(s) for s in _STATUS_SUFFIXES):
+            return False
+        if 'is typing' in lower or 'are typing' in lower:
+            return False
+        if ' , ' in name:
+            parts = name.split(' , ')
+            if ':' not in parts[-1]:
+                return False
+            body = ' , '.join(parts[1:-1]).strip() if len(parts) >= 3 else ""
+            return bool(body)
+        return len(name) >= 3 and not _TIMESTAMP_RE.match(name.strip())
+
+    def _getMessagesViaUIA(self, count=10):
+        """Walk the UIA tree and return up to *count* recent messages (oldest first)."""
+        try:
+            uia = UIAHandler.handler.clientObject
+            if not uia:
+                return []
+
+            hwnd = self._discordHwnd
+            if not hwnd:
+                import api
+                fg = api.getForegroundObject()
+                if fg and fg.appModule is self:
+                    hwnd = fg.windowHandle
+                    self._discordHwnd = hwnd
+            if not hwnd:
+                return []
+
+            root = uia.ElementFromHandle(hwnd)
+            if not root:
+                return []
+
+            condition = uia.CreatePropertyCondition(
+                _UIA_ControlTypePropertyId, _UIA_ListControlTypeId
+            )
+            lists = root.FindAll(_UIA_TreeScope_Descendants, condition)
+            if not lists or lists.Length == 0:
+                return []
+
+            msgList = None
+            for i in range(lists.Length):
+                elem = lists.GetElement(i)
+                n = elem.GetCurrentPropertyValue(_UIA_NamePropertyId) or ""
+                if "messages in" in n.lower():
+                    msgList = elem
+                    break
+            if not msgList:
+                return []
+
+            walker = uia.RawViewWalker
+            candidates = []
+            child = walker.GetLastChildElement(msgList)
+            # Over-collect to account for non-message items (date separators, etc.)
+            limit = count * 4
+            iterations = 0
+            while child and iterations < limit:
+                iterations += 1
+                name = child.GetCurrentPropertyValue(_UIA_NamePropertyId) or ""
+                if name:
+                    candidates.append(name)
+                else:
+                    grandchild = walker.GetLastChildElement(child)
+                    while grandchild:
+                        gname = grandchild.GetCurrentPropertyValue(_UIA_NamePropertyId) or ""
+                        if gname:
+                            candidates.append(gname)
+                            break
+                        grandchild = walker.GetPreviousSiblingElement(grandchild)
+                child = walker.GetPreviousSiblingElement(child)
+
+            messages = [m for m in candidates if self._isValidMessage(m)]
+            messages = messages[:count]
+            messages.reverse()  # oldest first
+            return messages
+
+        except Exception as e:
+            log.warning("DiscordMessages: getMessages error: %s" % e)
+            return []
+
+    def _readNthLastMessage(self, n):
+        """Speak the Nth-last message (1 = most recent, 10 = oldest of last ten)."""
+        import api
+        try:
+            fg = api.getForegroundObject()
+            if not fg or fg.appModule is not self:
+                return
+        except Exception:
+            return
+        messages = self._getMessagesViaUIA(count=10)
+        if not messages:
+            speech.speak(["No messages found"], priority=speech.Spri.NOW)
+            return
+        # messages is oldest-first; n=1 → most recent → index -1
+        idx = len(messages) - n
+        if idx < 0:
+            speech.speak(["Message %d not available" % n], priority=speech.Spri.NOW)
+            return
+        self._doAnnounce(messages[idx])
+
+    def script_readMessage1(self, gesture):
+        """Read the most recent message."""
+        self._readNthLastMessage(1)
+
+    def script_readMessage2(self, gesture):
+        """Read the 2nd most recent message."""
+        self._readNthLastMessage(2)
+
+    def script_readMessage3(self, gesture):
+        """Read the 3rd most recent message."""
+        self._readNthLastMessage(3)
+
+    def script_readMessage4(self, gesture):
+        """Read the 4th most recent message."""
+        self._readNthLastMessage(4)
+
+    def script_readMessage5(self, gesture):
+        """Read the 5th most recent message."""
+        self._readNthLastMessage(5)
+
+    def script_readMessage6(self, gesture):
+        """Read the 6th most recent message."""
+        self._readNthLastMessage(6)
+
+    def script_readMessage7(self, gesture):
+        """Read the 7th most recent message."""
+        self._readNthLastMessage(7)
+
+    def script_readMessage8(self, gesture):
+        """Read the 8th most recent message."""
+        self._readNthLastMessage(8)
+
+    def script_readMessage9(self, gesture):
+        """Read the 9th most recent message."""
+        self._readNthLastMessage(9)
+
+    def script_readMessage10(self, gesture):
+        """Read the 10th most recent message."""
+        self._readNthLastMessage(10)
+
+    def script_toggleAnnounce(self, gesture):
+        """Toggle automatic announcement of incoming messages on or off."""
+        self._announceEnabled = not self._announceEnabled
+        state = "on" if self._announceEnabled else "off"
+        speech.speak(["Discord announcements %s" % state], priority=speech.Spri.NOW)
+        log.info("DiscordMessages: announcements toggled %s" % state)
+
+    __gestures = {
+        "kb:NVDA+shift+d": "toggleAnnounce",
+        "kb:alt+1": "readMessage1",
+        "kb:alt+2": "readMessage2",
+        "kb:alt+3": "readMessage3",
+        "kb:alt+4": "readMessage4",
+        "kb:alt+5": "readMessage5",
+        "kb:alt+6": "readMessage6",
+        "kb:alt+7": "readMessage7",
+        "kb:alt+8": "readMessage8",
+        "kb:alt+9": "readMessage9",
+        "kb:alt+0": "readMessage10",
+    }
 
     # ------------------------------------------------------------------ #
     # NVDA event handlers                                                 #
