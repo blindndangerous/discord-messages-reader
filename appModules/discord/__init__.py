@@ -107,14 +107,18 @@ class AppModule(appModuleHandler.AppModule):
 	# ------------------------------------------------------------------ #
 
 	def _winEventCallback(self, hHook, event, hwnd, idObject, idChild, thread, time_ms):
-		if not self._discordHwnd:
-			self._discordHwnd = hwnd
-		self._lastHookTime = time.time()
-		# Debounce: skip if a UIA read ran within the last poll interval.
-		# This prevents stacking up tree walks during rapid navigation.
-		if time.time() - self._lastUiaRead < _POLL_INTERVAL_MS / 1000.0:
-			return
-		wx.CallAfter(self._uiaRead)
+		try:
+			# Only store a non-zero hwnd; zero is not a valid window handle.
+			if not self._discordHwnd and hwnd:
+				self._discordHwnd = hwnd
+			self._lastHookTime = time.time()
+			# Debounce: skip if a UIA read ran within the last poll interval.
+			# This prevents stacking up tree walks during rapid navigation.
+			if time.time() - self._lastUiaRead < _POLL_INTERVAL_MS / 1000.0:
+				return
+			wx.CallAfter(self._uiaRead)
+		except Exception as e:
+			log.warning(f"DiscordMessages: winEventCallback error: {e}")
 
 	# ------------------------------------------------------------------ #
 	# UIA polling — primary message detection                             #
@@ -267,7 +271,10 @@ class AppModule(appModuleHandler.AppModule):
 		else:
 			formatted = text
 		log.debug(f"DiscordMessages: SPEAKING {formatted[:120]!r}")
-		speech.speak([formatted], priority=speech.Spri.NOW)
+		try:
+			speech.speak([formatted], priority=speech.Spri.NOW)
+		except Exception as e:
+			log.warning(f"DiscordMessages: speech error: {e}")
 
 	# ------------------------------------------------------------------ #
 	# History reading — Alt+1 through Alt+0                              #
@@ -367,12 +374,18 @@ class AppModule(appModuleHandler.AppModule):
 			return
 		messages = self._getMessagesViaUIA(count=10)
 		if not messages:
-			speech.speak(["No messages found"], priority=speech.Spri.NOW)
+			try:
+				speech.speak(["No messages found"], priority=speech.Spri.NOW)
+			except Exception as e:
+				log.warning(f"DiscordMessages: speech error: {e}")
 			return
 		# messages is oldest-first; n=1 → most recent → index -1
 		idx = len(messages) - n
 		if idx < 0:
-			speech.speak([f"Message {n} not available"], priority=speech.Spri.NOW)
+			try:
+				speech.speak([f"Message {n} not available"], priority=speech.Spri.NOW)
+			except Exception as e:
+				log.warning(f"DiscordMessages: speech error: {e}")
 			return
 		self._doAnnounce(messages[idx])
 
@@ -420,7 +433,10 @@ class AppModule(appModuleHandler.AppModule):
 		"""Toggle automatic announcement of incoming messages on or off."""
 		self._announceEnabled = not self._announceEnabled
 		state = "on" if self._announceEnabled else "off"
-		speech.speak([f"Discord announcements {state}"], priority=speech.Spri.NOW)
+		try:
+			speech.speak([f"Discord announcements {state}"], priority=speech.Spri.NOW)
+		except Exception as e:
+			log.warning(f"DiscordMessages: speech error: {e}")
 		log.info(f"DiscordMessages: announcements toggled {state}")
 
 	__gestures = {

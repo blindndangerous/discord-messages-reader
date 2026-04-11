@@ -163,6 +163,21 @@ class TestWinEventCallback:
         app_module._winEventCallback(None, None, 0xABC, None, None, None, None)
         wx.CallAfter.assert_not_called()
 
+    def test_does_not_store_zero_hwnd(self, app_module):
+        """hwnd=0 is not a valid window handle and must not be stored."""
+        app_module._discordHwnd = 0
+        app_module._winEventCallback(None, None, 0, None, None, None, None)
+        assert app_module._discordHwnd == 0  # unchanged — zero was not stored
+
+    def test_callback_survives_internal_exception(self, app_module):
+        """An exception in the callback body must not propagate (ctypes safety)."""
+        wx_mod = sys.modules['wx']
+        wx_mod.CallAfter.side_effect = RuntimeError("wx failure")
+        app_module._lastUiaRead = 0.0
+        # Must not raise
+        app_module._winEventCallback(None, None, 0xABC, None, None, None, None)
+        wx_mod.CallAfter.side_effect = None
+
 
 # ---------------------------------------------------------------------------
 # NVDA event handlers
@@ -271,3 +286,48 @@ class TestEventHandlers:
         app_module._filterAndAnnounce = spy
         app_module.event_alert(obj, MagicMock())  # must not raise
         spy.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# Speech error resilience
+# ---------------------------------------------------------------------------
+
+class TestSpeechResilience:
+    def test_doAnnounce_survives_speech_error(self, app_module):
+        """speech.speak failure must not propagate out of _doAnnounce."""
+        speech = sys.modules['speech']
+        speech.speak.side_effect = RuntimeError("synth crashed")
+        app_module._doAnnounce("some message")  # must not raise
+        speech.speak.side_effect = None
+
+    def test_toggle_script_survives_speech_error(self, app_module):
+        """speech.speak failure in script_toggleAnnounce must not crash."""
+        speech = sys.modules['speech']
+        speech.speak.side_effect = RuntimeError("synth crashed")
+        app_module.script_toggleAnnounce(MagicMock())  # must not raise
+        speech.speak.side_effect = None
+
+    def test_read_nth_no_messages_survives_speech_error(self, app_module):
+        """speech.speak failure in 'no messages found' path must not crash."""
+        speech = sys.modules['speech']
+        speech.speak.side_effect = RuntimeError("synth crashed")
+        api = sys.modules['api']
+        fg = MagicMock()
+        fg.appModule = app_module
+        api.getForegroundObject.return_value = fg
+        app_module._getMessagesViaUIA = MagicMock(return_value=[])
+        app_module._readNthLastMessage(1)  # must not raise
+        speech.speak.side_effect = None
+
+    def test_read_nth_unavailable_survives_speech_error(self, app_module):
+        """speech.speak failure in 'message N not available' path must not crash."""
+        speech = sys.modules['speech']
+        speech.speak.side_effect = RuntimeError("synth crashed")
+        api = sys.modules['api']
+        fg = MagicMock()
+        fg.appModule = app_module
+        api.getForegroundObject.return_value = fg
+        # Only 1 message; requesting message 5 → "not available"
+        app_module._getMessagesViaUIA = MagicMock(return_value=["only msg"])
+        app_module._readNthLastMessage(5)  # must not raise
+        speech.speak.side_effect = None
