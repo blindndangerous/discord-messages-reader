@@ -288,8 +288,19 @@ class TestAnnounceToggle:
         app_module._announceEnabled = False
         sys.modules['speech'].speak.reset_mock()
         app_module._scheduleAnnounce("alice , hello , 9:00 AM")
-        # _lastText is updated but speech.speak must NOT be called
         sys.modules['speech'].speak.assert_not_called()
+
+    def test_toggle_off_stops_uia_polling(self, app_module):
+        """When muted, _uiaRead must return before touching the UIA tree."""
+        app_module._announceEnabled = False
+        app_module._getLatestMessageViaUIA = MagicMock()
+
+        fg = MagicMock()
+        fg.appModule = app_module
+        sys.modules['api'].getForegroundObject.return_value = fg
+
+        app_module._uiaRead()
+        app_module._getLatestMessageViaUIA.assert_not_called()
 
     def test_toggle_on_allows_announcements(self, app_module):
         app_module._announceEnabled = True

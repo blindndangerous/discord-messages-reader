@@ -131,6 +131,8 @@ class AppModule(appModuleHandler.AppModule):
 
     def _uiaRead(self):
         """Read the latest message from Discord's UIA tree; announce if new."""
+        if not self._announceEnabled:
+            return
         import api
         try:
             fg = api.getForegroundObject()
