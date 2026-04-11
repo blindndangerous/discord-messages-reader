@@ -1,0 +1,36 @@
+[project]
+name = "discord-messages-reader"
+version = "0.1.0"
+description = "NVDA add-on that announces incoming Discord chat messages automatically via UIA polling."
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = []
+
+[dependency-groups]
+dev = [
+    "pytest>=7.0",
+    "ruff>=0.15.10",
+]
+
+[tool.ruff]
+# Addon files use tabs (NVDA convention); test files use spaces (PEP 8).
+# Ruff's formatter is not used — we lint only.
+line-length = 120
+
+[tool.ruff.lint]
+select = [
+    "F",    # pyflakes — unused imports, undefined names
+    "E",    # pycodestyle errors
+    "W",    # pycodestyle warnings
+    "UP",   # pyupgrade — modernise syntax
+]
+ignore = [
+    "W191", # tabs in indentation (addon files use tabs by convention)
+    "E101", # mixed indentation (follows from W191)
+    "UP031", # prefer f-strings over % formatting — deferred, apply separately
+]
+
+[tool.ruff.lint.per-file-ignores]
+# conftest.py installs NVDA stubs before importing project code.
+# The late imports are intentional — E402 would be a false positive.
+"tests/conftest.py" = ["E402"]

@@ -8,9 +8,8 @@ Covers:
 - Plain-text passed through unchanged
 - speech.speak called with the right arguments
 """
-import pytest
 import sys
-from unittest.mock import MagicMock, call
+from unittest.mock import MagicMock
 
 
 # ---------------------------------------------------------------------------

@@ -4,7 +4,7 @@ These tests verify that the filter correctly passes real messages and
 rejects noise (status changes, typing indicators, empty bodies, timestamps).
 """
 import pytest
-from unittest.mock import patch, MagicMock
+from unittest.mock import MagicMock
 
 
 # ---------------------------------------------------------------------------
