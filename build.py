@@ -34,19 +34,19 @@ def build():
     os.chdir(root)
 
     version = read_version()
-    out_name = "discord_messages_reader-%s.nvda-addon" % version
+    out_name = f"discord_messages_reader-{version}.nvda-addon"
     os.makedirs(_DIST, exist_ok=True)
     out_path = os.path.join(_DIST, out_name)
 
     with zipfile.ZipFile(out_path, "w", compression=zipfile.ZIP_DEFLATED) as zf:
         for src, arc in _INCLUDE:
             if not os.path.isfile(src):
-                print("ERROR: missing required file: %s" % src, file=sys.stderr)
+                print(f"ERROR: missing required file: {src}", file=sys.stderr)
                 sys.exit(1)
             zf.write(src, arc)
-            print("  added %s" % arc)
+            print(f"  added {arc}")
 
-    print("\nBuilt: %s" % out_path)
+    print(f"\nBuilt: {out_path}")
     return out_path
 
 
