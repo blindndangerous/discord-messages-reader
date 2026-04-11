@@ -7,7 +7,7 @@ handlers) without requiring a live Discord process or NVDA session.
 import sys
 import time
 import pytest
-from unittest.mock import MagicMock, patch, call
+from unittest.mock import MagicMock, patch
 
 
 # ---------------------------------------------------------------------------

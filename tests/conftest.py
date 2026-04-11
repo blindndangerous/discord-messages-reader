@@ -75,7 +75,7 @@ _install_stubs()
 # Now it is safe to import from our package.
 # ---------------------------------------------------------------------------
 import pytest
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch
 
 
 @pytest.fixture()
