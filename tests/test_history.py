@@ -146,7 +146,7 @@ class TestGetMessagesViaUIA:
 
     def test_count_limits_results(self, uia_ctx):
         app_module, uia = uia_ctx
-        names = ["alice , msg%d , 9:0%d AM" % (i, i) for i in range(1, 8)]
+        names = [f"alice , msg{i} , 9:0{i} AM" for i in range(1, 8)]
         _build_linear_list(uia, names)
         result = app_module._getMessagesViaUIA(count=3)
         # Should return the 3 most recent, oldest-first
@@ -253,8 +253,8 @@ class TestReadNthLastMessage:
 class TestGestureRegistration:
     def test_all_ten_scripts_exist(self, app_module):
         for i in range(1, 11):
-            assert hasattr(app_module, "script_readMessage%d" % i), (
-                "missing script_readMessage%d" % i
+            assert hasattr(app_module, f"script_readMessage{i}"), (
+                f"missing script_readMessage{i}"
             )
 
     def test_gestures_dict_maps_alt_keys(self, app_module):

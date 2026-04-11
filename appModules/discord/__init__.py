@@ -66,7 +66,7 @@ class AppModule(appModuleHandler.AppModule):
 
 	def __init__(self, *args, **kwargs):
 		super().__init__(*args, **kwargs)
-		log.info("DiscordMessages: loaded (PID %d)" % self.processID)
+		log.info(f"DiscordMessages: loaded (PID {self.processID})")
 
 		# IAccessible WinEvent hook — fast-path trigger when IAccessible is active.
 		# Must hold a reference to _hookProc or the GC will free the ctypes callback.
@@ -144,10 +144,10 @@ class AppModule(appModuleHandler.AppModule):
 			name = self._getLatestMessageViaUIA()
 			self._lastUiaRead = time.time()
 			if name:
-				log.debug("DiscordMessages: UIA read: %r" % name[:120])
+				log.debug(f"DiscordMessages: UIA read: {name[:120]!r}")
 				self._filterAndAnnounce(name)
 		except Exception as e:
-			log.warning("DiscordMessages: uiaRead error: %s" % e)
+			log.warning(f"DiscordMessages: uiaRead error: {e}")
 
 	def _getLatestMessageViaUIA(self):
 		"""Walk Discord's UIA tree and return the text of the latest message."""
@@ -212,7 +212,7 @@ class AppModule(appModuleHandler.AppModule):
 			return None
 
 		except Exception as e:
-			log.warning("DiscordMessages: getLatestMessage error: %s" % e)
+			log.warning(f"DiscordMessages: getLatestMessage error: {e}")
 			return None
 
 	# ------------------------------------------------------------------ #
@@ -249,7 +249,7 @@ class AppModule(appModuleHandler.AppModule):
 		self._lastText = text
 		if not self._announceEnabled:
 			return
-		log.debug("DiscordMessages: announcing %r" % text[:80])
+		log.debug(f"DiscordMessages: announcing {text[:80]!r}")
 		self._doAnnounce(text)
 
 	def _doAnnounce(self, text):
@@ -257,13 +257,13 @@ class AppModule(appModuleHandler.AppModule):
 		if ' , ' in text:
 			parts = text.split(' , ')
 			formatted = (
-				"%s: %s" % (parts[0], ' , '.join(parts[1:-1]))
+				"{}: {}".format(parts[0], ' , '.join(parts[1:-1]))
 				if len(parts) >= 3
 				else parts[0]
 			)
 		else:
 			formatted = text
-		log.debug("DiscordMessages: SPEAKING %r" % formatted[:120])
+		log.debug(f"DiscordMessages: SPEAKING {formatted[:120]!r}")
 		speech.speak([formatted], priority=speech.Spri.NOW)
 
 	# ------------------------------------------------------------------ #
@@ -350,7 +350,7 @@ class AppModule(appModuleHandler.AppModule):
 			return messages
 
 		except Exception as e:
-			log.warning("DiscordMessages: getMessages error: %s" % e)
+			log.warning(f"DiscordMessages: getMessages error: {e}")
 			return []
 
 	def _readNthLastMessage(self, n):
@@ -369,7 +369,7 @@ class AppModule(appModuleHandler.AppModule):
 		# messages is oldest-first; n=1 → most recent → index -1
 		idx = len(messages) - n
 		if idx < 0:
-			speech.speak(["Message %d not available" % n], priority=speech.Spri.NOW)
+			speech.speak([f"Message {n} not available"], priority=speech.Spri.NOW)
 			return
 		self._doAnnounce(messages[idx])
 
@@ -417,8 +417,8 @@ class AppModule(appModuleHandler.AppModule):
 		"""Toggle automatic announcement of incoming messages on or off."""
 		self._announceEnabled = not self._announceEnabled
 		state = "on" if self._announceEnabled else "off"
-		speech.speak(["Discord announcements %s" % state], priority=speech.Spri.NOW)
-		log.info("DiscordMessages: announcements toggled %s" % state)
+		speech.speak([f"Discord announcements {state}"], priority=speech.Spri.NOW)
+		log.info(f"DiscordMessages: announcements toggled {state}")
 
 	__gestures = {
 		"kb:NVDA+shift+d": "toggleAnnounce",

@@ -27,7 +27,6 @@ select = [
 ignore = [
     "W191", # tabs in indentation (addon files use tabs by convention)
     "E101", # mixed indentation (follows from W191)
-    "UP031", # prefer f-strings over % formatting — deferred, apply separately
 ]
 
 [tool.ruff.lint.per-file-ignores]
