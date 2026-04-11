@@ -1,1 +1,1 @@
-from discord import AppModule  # noqa: F401
+from discord import AppModule as AppModule

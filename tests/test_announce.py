@@ -8,13 +8,14 @@ Covers:
 - Plain-text passed through unchanged
 - speech.speak called with the right arguments
 """
+
 import sys
 from unittest.mock import MagicMock
-
 
 # ---------------------------------------------------------------------------
 # Deduplication — _scheduleAnnounce
 # ---------------------------------------------------------------------------
+
 
 class TestScheduleAnnounce:
     def test_first_call_announces(self, app_module):
@@ -81,10 +82,11 @@ class TestScheduleAnnounce:
 # Formatting — _doAnnounce
 # ---------------------------------------------------------------------------
 
+
 class TestDoAnnounce:
     def _speak_arg(self, app_module, text):
         """Call _doAnnounce and return the string passed to speech.speak."""
-        speech = sys.modules['speech']
+        speech = sys.modules["speech"]
         speech.speak.reset_mock()
         app_module._doAnnounce(text)
         assert speech.speak.called
@@ -110,15 +112,15 @@ class TestDoAnnounce:
         assert result == "hello from a friend"
 
     def test_speech_speak_called_with_list(self, app_module):
-        speech = sys.modules['speech']
+        speech = sys.modules["speech"]
         speech.speak.reset_mock()
         app_module._doAnnounce("test message")
-        args, kwargs = speech.speak.call_args
+        args, _kwargs = speech.speak.call_args
         assert isinstance(args[0], list)
 
     def test_speech_priority_is_now(self, app_module):
-        speech = sys.modules['speech']
+        speech = sys.modules["speech"]
         speech.speak.reset_mock()
         app_module._doAnnounce("test")
         _, kwargs = speech.speak.call_args
-        assert kwargs.get('priority') == speech.Spri.NOW
+        assert kwargs.get("priority") == speech.Spri.NOW

@@ -22,7 +22,7 @@ pytest.ini                  — Runs tests from tests/ directory
 
 ```bash
 python build.py             # produces dist/discord_messages_reader-X.X.X.nvda-addon
-pytest                      # 68 tests, all should pass
+pytest                      # 131 tests, all should pass
 ```
 
 Pytest is installed at:
@@ -50,6 +50,14 @@ Then restart NVDA (Ctrl+Alt+N) to reload.
   (used to suppress spurious `event_valueChange` when Discord clears the edit
   field after sending a message). It is debounced to avoid stacking UIA reads
   during navigation.
+- **`core.callLater`** is used for all timer scheduling — it is thread-safe
+  (internally posts to the main thread), so `_schedulePoll` can be called from
+  any thread, including the Dummy-N worker thread NVDA uses when Discord
+  launches while NVDA is already running.
+- **Message list caching** (`_cachedMsgList`/`_cachedMsgListName`): the
+  expensive `FindAll` UIA tree walk is skipped on subsequent polls when the
+  element is still valid. The cache is invalidated on COM errors or when the
+  element name changes (channel switch). Implemented in `_getMsgListViaUIA`.
 - **`disableBrowseModeByDefault = True`** suppresses NVDA's virtual buffer for
   Discord, which is the recommended approach for Electron apps.
 - **Message dedup** is content-based only (`_lastText`). No time window — the

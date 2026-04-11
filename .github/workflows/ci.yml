@@ -16,26 +16,43 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v5
-      - run: uv sync --dev
-      - run: uv run ruff check .
+        with:
+          enable-cache: true
+      - name: Install dependencies
+        run: uv sync
+      - name: Ruff — lint
+        run: uv run ruff check .
+      - name: Ruff — format check (tests only)
+        run: uv run ruff format tests/ --check
+
+  security:
+    name: bandit + pip-audit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+      - name: Install dependencies
+        run: uv sync
+      - name: Bandit — security scan
+        run: uv run bandit -r appModules/ -c pyproject.toml
+      - name: pip-audit — dependency CVE scan
+        run: uv run pip-audit
 
   test:
-    name: pytest (Python ${{ matrix.python-version }})
+    name: pytest (Python 3.13)
     runs-on: windows-latest
-    strategy:
-      matrix:
-        python-version: ["3.13"]
-
     steps:
       - uses: actions/checkout@v4
 
-      - name: Set up Python ${{ matrix.python-version }}
-        uses: actions/setup-python@v5
+      - uses: astral-sh/setup-uv@v5
         with:
-          python-version: ${{ matrix.python-version }}
+          enable-cache: true
+          python-version: "3.13"
 
       - name: Install dependencies
-        run: pip install -r requirements-dev.txt
+        run: uv sync
 
-      - name: Run tests
-        run: pytest
+      - name: Pytest — test suite with coverage
+        run: uv run pytest --tb=short

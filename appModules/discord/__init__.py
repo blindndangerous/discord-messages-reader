@@ -13,15 +13,17 @@ The WinEvent hook is kept as a fast-path trigger: when it fires (e.g. from
 the message list being active), it triggers an immediate UIA read instead of
 waiting for the next poll cycle.
 """
+import contextlib
 import ctypes
 import ctypes.wintypes
 import re
 import time
-import wx
+
 import appModuleHandler
-from logHandler import log
-import UIAHandler
+import core
 import speech
+import UIAHandler
+from logHandler import log
 
 EVENT_OBJECT_NAMECHANGE = 0x800C
 WINEVENT_OUTOFCONTEXT   = 0x0000
@@ -92,10 +94,8 @@ class AppModule(appModuleHandler.AppModule):
 	def terminate(self):
 		self._terminated = True
 		if self._pollTimer is not None:
-			try:
+			with contextlib.suppress(Exception):
 				self._pollTimer.Stop()
-			except Exception:
-				pass
 			self._pollTimer = None
 		if getattr(self, '_hook', None):
 			ctypes.windll.user32.UnhookWinEvent(self._hook)
@@ -116,7 +116,7 @@ class AppModule(appModuleHandler.AppModule):
 			# This prevents stacking up tree walks during rapid navigation.
 			if time.time() - self._lastUiaRead < _POLL_INTERVAL_MS / 1000.0:
 				return
-			wx.CallAfter(self._uiaRead)
+			core.callLater(0, self._uiaRead)
 		except Exception as e:
 			log.warning(f"DiscordMessages: winEventCallback error: {e}")
 
@@ -125,20 +125,14 @@ class AppModule(appModuleHandler.AppModule):
 	# ------------------------------------------------------------------ #
 
 	def _schedulePoll(self):
-		"""Queue timer creation on the main wx thread.
+		"""Schedule the next UIA poll.
 
-		Safe to call from any thread — wx.CallAfter posts to the main thread's
-		event loop, satisfying wx's requirement that timers are started from the
-		main thread.  This matters when NVDA creates the AppModule on a worker
-		thread (Dummy-N) because Discord launched after NVDA was already running.
+		core.callLater is thread-safe — it posts to the main thread internally,
+		so this is safe to call from any thread (including the Dummy-N worker
+		thread NVDA uses when Discord launches while NVDA is already running).
 		"""
 		if not self._terminated:
-			wx.CallAfter(self._startPollTimer)
-
-	def _startPollTimer(self):
-		"""Create the wx.CallLater timer — must only run on the main thread."""
-		if not self._terminated:
-			self._pollTimer = wx.CallLater(_POLL_INTERVAL_MS, self._pollTick)
+			self._pollTimer = core.callLater(_POLL_INTERVAL_MS, self._pollTick)
 
 	def _pollTick(self):
 		self._pollTimer = None
@@ -168,6 +162,58 @@ class AppModule(appModuleHandler.AppModule):
 		except Exception as e:
 			log.warning(f"DiscordMessages: uiaRead error: {e}")
 
+	_cachedMsgList = None
+	_cachedMsgListName = None
+
+	def _getMsgListViaUIA(self, uia):
+		"""Find and cache the Discord message list UIA element.
+
+		On a cache hit the expensive FindAll tree walk is skipped entirely.
+		The cache is invalidated when the element's name changes (channel
+		switch) or when accessing it raises a COM exception (element detached).
+		"""
+		if self._cachedMsgList:
+			cache_valid = False
+			with contextlib.suppress(Exception):
+				n = self._cachedMsgList.GetCurrentPropertyValue(_UIA_NamePropertyId) or ""
+				cache_valid = bool(n and n == self._cachedMsgListName)
+			if cache_valid:
+				return self._cachedMsgList
+			self._cachedMsgList = None
+			self._cachedMsgListName = None
+
+		hwnd = self._discordHwnd
+		if not hwnd:
+			import api
+			fg = api.getForegroundObject()
+			if fg and fg.appModule is self:
+				hwnd = fg.windowHandle
+				self._discordHwnd = hwnd
+		if not hwnd:
+			return None
+
+		root = uia.ElementFromHandle(hwnd)
+		if not root:
+			return None
+
+		# Find all List controls then pick the one named "Messages in …".
+		# Discord's sidebar also has a "Direct Messages" list — we skip it.
+		condition = uia.CreatePropertyCondition(
+			_UIA_ControlTypePropertyId, _UIA_ListControlTypeId
+		)
+		lists = root.FindAll(_UIA_TreeScope_Descendants, condition)
+		if not lists or lists.Length == 0:
+			return None
+
+		for i in range(lists.Length):
+			elem = lists.GetElement(i)
+			n = elem.GetCurrentPropertyValue(_UIA_NamePropertyId) or ""
+			if "messages in" in n.lower():
+				self._cachedMsgList = elem
+				self._cachedMsgListName = n
+				return elem
+		return None
+
 	def _getLatestMessageViaUIA(self):
 		"""Walk Discord's UIA tree and return the text of the latest message."""
 		try:
@@ -175,45 +221,24 @@ class AppModule(appModuleHandler.AppModule):
 			if not uia:
 				return None
 
-			hwnd = self._discordHwnd
-			if not hwnd:
-				import api
-				fg = api.getForegroundObject()
-				if fg and fg.appModule is self:
-					hwnd = fg.windowHandle
-					self._discordHwnd = hwnd
-			if not hwnd:
-				return None
-
-			root = uia.ElementFromHandle(hwnd)
-			if not root:
-				return None
-
-			# Find all List controls then pick the one named "Messages in …".
-			# Discord's sidebar also has a "Direct Messages" list — we skip it.
-			condition = uia.CreatePropertyCondition(
-				_UIA_ControlTypePropertyId, _UIA_ListControlTypeId
-			)
-			lists = root.FindAll(_UIA_TreeScope_Descendants, condition)
-			if not lists or lists.Length == 0:
-				return None
-
-			msgList = None
-			for i in range(lists.Length):
-				elem = lists.GetElement(i)
-				n = elem.GetCurrentPropertyValue(_UIA_NamePropertyId) or ""
-				if "messages in" in n.lower():
-					msgList = elem
-					break
-
+			msgList = self._getMsgListViaUIA(uia)
 			if not msgList:
 				return None
 
 			walker = uia.RawViewWalker
+			child = walker.GetLastChildElement(msgList)
+
+			# If the cached element is detached it will have no children — retry.
+			if not child and self._cachedMsgList is not None:
+				self._cachedMsgList = None
+				self._cachedMsgListName = None
+				msgList = self._getMsgListViaUIA(uia)
+				if not msgList:
+					return None
+				child = walker.GetLastChildElement(msgList)
 
 			# Walk backward from the last child; message containers often have
 			# an empty aggregate name — content lives in grandchildren.
-			child = walker.GetLastChildElement(msgList)
 			for _ in range(10):
 				if not child:
 					break
@@ -314,40 +339,23 @@ class AppModule(appModuleHandler.AppModule):
 			if not uia:
 				return []
 
-			hwnd = self._discordHwnd
-			if not hwnd:
-				import api
-				fg = api.getForegroundObject()
-				if fg and fg.appModule is self:
-					hwnd = fg.windowHandle
-					self._discordHwnd = hwnd
-			if not hwnd:
-				return []
-
-			root = uia.ElementFromHandle(hwnd)
-			if not root:
-				return []
-
-			condition = uia.CreatePropertyCondition(
-				_UIA_ControlTypePropertyId, _UIA_ListControlTypeId
-			)
-			lists = root.FindAll(_UIA_TreeScope_Descendants, condition)
-			if not lists or lists.Length == 0:
-				return []
-
-			msgList = None
-			for i in range(lists.Length):
-				elem = lists.GetElement(i)
-				n = elem.GetCurrentPropertyValue(_UIA_NamePropertyId) or ""
-				if "messages in" in n.lower():
-					msgList = elem
-					break
+			msgList = self._getMsgListViaUIA(uia)
 			if not msgList:
 				return []
 
 			walker = uia.RawViewWalker
-			candidates = []
 			child = walker.GetLastChildElement(msgList)
+
+			# If the cached element is detached it will have no children — retry.
+			if not child and self._cachedMsgList is not None:
+				self._cachedMsgList = None
+				self._cachedMsgListName = None
+				msgList = self._getMsgListViaUIA(uia)
+				if not msgList:
+					return []
+				child = walker.GetLastChildElement(msgList)
+
+			candidates = []
 			# Over-collect to account for non-message items (date separators, etc.)
 			limit = count * 4
 			iterations = 0
@@ -451,8 +459,8 @@ class AppModule(appModuleHandler.AppModule):
 			log.warning(f"DiscordMessages: speech error: {e}")
 		log.info(f"DiscordMessages: announcements toggled {state}")
 
-	__gestures = {
-		"kb:NVDA+shift+d": "toggleAnnounce",
+	__gestures = {  # noqa: RUF012 — NVDA reads this as a class attr by convention
+		"kb:NVDA+ctrl+shift+d": "toggleAnnounce",
 		"kb:alt+1": "readMessage1",
 		"kb:alt+2": "readMessage2",
 		"kb:alt+3": "readMessage3",

@@ -8,28 +8,61 @@ dependencies = []
 
 [dependency-groups]
 dev = [
-    "pytest>=7.0",
+    "pytest>=8.0.0",
+    "pytest-cov>=5.0.0",
+    "pytest-mock>=3.14.0",
     "ruff>=0.15.10",
+    "bandit>=1.9.0",
+    "pip-audit>=2.10.0",
 ]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "--cov=appModules --cov-report=term-missing"
+
+[tool.coverage.run]
+source = ["appModules"]
+omit = ["appModules/discordptb/*", "appModules/discordcanary/*"]
+
+[tool.coverage.report]
+fail_under = 70
+show_missing = true
 
 [tool.ruff]
 # Addon files use tabs (NVDA convention); test files use spaces (PEP 8).
-# Ruff's formatter is not used — we lint only.
+# Ruff's formatter is not run on appModules/ — tabs must be preserved.
 line-length = 120
+target-version = "py313"
 
 [tool.ruff.lint]
 select = [
-    "F",    # pyflakes — unused imports, undefined names
-    "E",    # pycodestyle errors
-    "W",    # pycodestyle warnings
-    "UP",   # pyupgrade — modernise syntax
+    "E",   # pycodestyle errors
+    "W",   # pycodestyle warnings
+    "F",   # pyflakes
+    "I",   # isort
+    "UP",  # pyupgrade
+    "B",   # bugbear
+    "C4",  # comprehensions
+    "SIM", # simplify
+    "RUF", # ruff-specific
 ]
 ignore = [
     "W191", # tabs in indentation (addon files use tabs by convention)
     "E101", # mixed indentation (follows from W191)
+    "E501", # line too long — formatter not used on addon files
 ]
 
 [tool.ruff.lint.per-file-ignores]
 # conftest.py installs NVDA stubs before importing project code.
 # The late imports are intentional — E402 would be a false positive.
 "tests/conftest.py" = ["E402"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["discord", "discordptb", "discordcanary"]
+
+[tool.bandit]
+targets = ["appModules"]
+exclude_dirs = ["tests"]
+skips = [
+    "B101",  # assert statements — fine outside web endpoints
+]

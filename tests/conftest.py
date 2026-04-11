@@ -5,15 +5,16 @@ UIAHandler, speech, wx, api) that are not available in a plain Python install.
 We create lightweight stubs and register them in sys.modules so that
 `import discord` (our AppModule package) can be resolved in tests.
 """
-import sys
+
 import os
+import sys
 import types
 from unittest.mock import MagicMock
 
 # ---------------------------------------------------------------------------
 # Add appModules/ to sys.path so `import discord` resolves our package.
 # ---------------------------------------------------------------------------
-_APPMODULES_DIR = os.path.join(os.path.dirname(__file__), '..', 'appModules')
+_APPMODULES_DIR = os.path.join(os.path.dirname(__file__), "..", "appModules")
 if _APPMODULES_DIR not in sys.path:
     sys.path.insert(0, os.path.abspath(_APPMODULES_DIR))
 
@@ -27,7 +28,7 @@ def _stub(name):
 
 def _install_stubs():
     # appModuleHandler — base class for all NVDA AppModules
-    m = _stub('appModuleHandler')
+    m = _stub("appModuleHandler")
 
     class _BaseAppModule:
         processID: int = 9999
@@ -41,32 +42,35 @@ def _install_stubs():
     m.AppModule = _BaseAppModule
 
     # logHandler
-    m = _stub('logHandler')
+    m = _stub("logHandler")
     m.log = MagicMock()
 
     # UIAHandler
-    m = _stub('UIAHandler')
+    m = _stub("UIAHandler")
     m.handler = MagicMock()
 
     # speech
-    m = _stub('speech')
+    m = _stub("speech")
     m.speak = MagicMock()
     m.Spri = MagicMock()
-    m.Spri.NOW = 'NOW'
+    m.Spri.NOW = "NOW"
 
-    # wx — only CallLater / CallAfter are used
-    m = _stub('wx')
-    m.CallLater = MagicMock(return_value=MagicMock())
+    # wx — CallAfter is still used by some event paths
+    m = _stub("wx")
     m.CallAfter = MagicMock()
 
+    # core — callLater is the NVDA-idiomatic thread-safe timer
+    m = _stub("core")
+    m.callLater = MagicMock(return_value=MagicMock())
+
     # api — NVDA object focus API
-    m = _stub('api')
+    m = _stub("api")
     m.getForegroundObject = MagicMock(return_value=None)
 
     # NVDAObjects (imported at module level in original; unused after cleanup
     # but kept in case of import-time side effects from other addons)
-    _stub('NVDAObjects')
-    _stub('NVDAObjects.IAccessible')
+    _stub("NVDAObjects")
+    _stub("NVDAObjects.IAccessible")
 
 
 _install_stubs()
@@ -74,21 +78,25 @@ _install_stubs()
 # ---------------------------------------------------------------------------
 # Now it is safe to import from our package.
 # ---------------------------------------------------------------------------
-import pytest
 from unittest.mock import patch
+
+import pytest
 
 
 @pytest.fixture()
 def app_module():
     """Return a live AppModule instance with Win32 and wx calls stubbed out."""
-    with patch('ctypes.windll') as mock_windll, \
-         patch('wx.CallLater', return_value=MagicMock()) as _mock_timer, \
-         patch('wx.CallAfter') as _mock_after:
+    with (
+        patch("ctypes.windll") as mock_windll,
+        patch("wx.CallAfter") as _mock_after,
+        patch("core.callLater", return_value=MagicMock()) as _mock_timer,
+    ):
         mock_windll.user32.SetWinEventHook.return_value = 0xDEAD
         mock_windll.user32.UnhookWinEvent.return_value = True
 
         # Import here so stubs are in place
         from discord import AppModule
+
         instance = AppModule()
         yield instance
 

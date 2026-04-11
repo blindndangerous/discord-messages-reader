@@ -3,13 +3,15 @@
 These tests verify that the filter correctly passes real messages and
 rejects noise (status changes, typing indicators, empty bodies, timestamps).
 """
-import pytest
+
 from unittest.mock import MagicMock
 
+import pytest
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _make_filter_spy(app_module):
     """Patch _scheduleAnnounce so we can assert whether a message was passed."""
@@ -22,10 +24,18 @@ def _make_filter_spy(app_module):
 # Status suffix filtering
 # ---------------------------------------------------------------------------
 
+
 class TestStatusSuffixes:
-    @pytest.mark.parametrize("suffix", [
-        ', Online', ', Offline', ', Idle', ', Do Not Disturb', ', Streaming',
-    ])
+    @pytest.mark.parametrize(
+        "suffix",
+        [
+            ", Online",
+            ", Offline",
+            ", Idle",
+            ", Do Not Disturb",
+            ", Streaming",
+        ],
+    )
     def test_status_suffix_is_filtered(self, app_module, suffix):
         spy = _make_filter_spy(app_module)
         app_module._filterAndAnnounce("SomeUser" + suffix)
@@ -36,10 +46,19 @@ class TestStatusSuffixes:
         app_module._filterAndAnnounce("hey can you come , online for a bit , 9:00 AM")
         spy.assert_called_once()
 
-    @pytest.mark.parametrize("suffix", [
-        ', online', ', offline', ', idle', ', do not disturb', ', streaming',
-        ', ONLINE', ', Offline', ', IDLE',
-    ])
+    @pytest.mark.parametrize(
+        "suffix",
+        [
+            ", online",
+            ", offline",
+            ", idle",
+            ", do not disturb",
+            ", streaming",
+            ", ONLINE",
+            ", Offline",
+            ", IDLE",
+        ],
+    )
     def test_status_suffix_filtered_case_insensitively(self, app_module, suffix):
         """Discord may vary casing; filtering must be case-insensitive."""
         spy = _make_filter_spy(app_module)
@@ -51,12 +70,16 @@ class TestStatusSuffixes:
 # Typing indicator filtering
 # ---------------------------------------------------------------------------
 
+
 class TestTypingIndicators:
-    @pytest.mark.parametrize("text", [
-        "Alice is typing...",
-        "Alice and Bob are typing...",
-        "ALICE IS TYPING",          # case-insensitive
-    ])
+    @pytest.mark.parametrize(
+        "text",
+        [
+            "Alice is typing...",
+            "Alice and Bob are typing...",
+            "ALICE IS TYPING",  # case-insensitive
+        ],
+    )
     def test_typing_indicator_is_filtered(self, app_module, text):
         spy = _make_filter_spy(app_module)
         app_module._filterAndAnnounce(text)
@@ -66,6 +89,7 @@ class TestTypingIndicators:
 # ---------------------------------------------------------------------------
 # IAccessible format: "username , body , HH:MM AM"
 # ---------------------------------------------------------------------------
+
 
 class TestIAccessibleFormat:
     def test_valid_message_is_passed(self, app_module):
@@ -102,15 +126,24 @@ class TestIAccessibleFormat:
 # Plain-text / UIA format
 # ---------------------------------------------------------------------------
 
+
 class TestPlainTextFormat:
     def test_short_string_is_filtered(self, app_module):
         spy = _make_filter_spy(app_module)
         app_module._filterAndAnnounce("hi")
         spy.assert_not_called()
 
-    @pytest.mark.parametrize("ts", [
-        "9:04 AM", "9:04", "12:30 PM", "12:30", "1:00am", "1:00 pm",
-    ])
+    @pytest.mark.parametrize(
+        "ts",
+        [
+            "9:04 AM",
+            "9:04",
+            "12:30 PM",
+            "12:30",
+            "1:00am",
+            "1:00 pm",
+        ],
+    )
     def test_timestamp_only_is_filtered(self, app_module, ts):
         spy = _make_filter_spy(app_module)
         app_module._filterAndAnnounce(ts)
