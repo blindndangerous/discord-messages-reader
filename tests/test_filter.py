@@ -36,6 +36,16 @@ class TestStatusSuffixes:
         app_module._filterAndAnnounce("hey can you come , online for a bit , 9:00 AM")
         spy.assert_called_once()
 
+    @pytest.mark.parametrize("suffix", [
+        ', online', ', offline', ', idle', ', do not disturb', ', streaming',
+        ', ONLINE', ', Offline', ', IDLE',
+    ])
+    def test_status_suffix_filtered_case_insensitively(self, app_module, suffix):
+        """Discord may vary casing; filtering must be case-insensitive."""
+        spy = _make_filter_spy(app_module)
+        app_module._filterAndAnnounce("SomeUser" + suffix)
+        spy.assert_not_called()
+
 
 # ---------------------------------------------------------------------------
 # Typing indicator filtering

@@ -38,6 +38,7 @@ _WinEventProcType = ctypes.WINFUNCTYPE(
 )
 
 _STATUS_SUFFIXES = (', Online', ', Offline', ', Idle', ', Do Not Disturb', ', Streaming')
+_STATUS_SUFFIXES_LOWER = tuple(s.lower() for s in _STATUS_SUFFIXES)
 
 # UIA property/type constants (from UIAutomationClient.h)
 _UIA_NamePropertyId        = 30005
@@ -131,6 +132,8 @@ class AppModule(appModuleHandler.AppModule):
 
 	def _uiaRead(self):
 		"""Read the latest message from Discord's UIA tree; announce if new."""
+		if self._terminated:
+			return
 		if not self._announceEnabled:
 			return
 		import api
@@ -222,7 +225,7 @@ class AppModule(appModuleHandler.AppModule):
 	def _filterAndAnnounce(self, name):
 		lower = name.lower()
 
-		if any(name.endswith(s) for s in _STATUS_SUFFIXES):
+		if any(lower.endswith(s) for s in _STATUS_SUFFIXES_LOWER):
 			return
 		if 'is typing' in lower or 'are typing' in lower:
 			return
@@ -246,9 +249,9 @@ class AppModule(appModuleHandler.AppModule):
 	def _scheduleAnnounce(self, text):
 		if text == self._lastText:
 			return
-		self._lastText = text
 		if not self._announceEnabled:
 			return
+		self._lastText = text
 		log.debug(f"DiscordMessages: announcing {text[:80]!r}")
 		self._doAnnounce(text)
 
@@ -273,7 +276,7 @@ class AppModule(appModuleHandler.AppModule):
 	def _isValidMessage(self, name):
 		"""Return True if *name* looks like a real chat message."""
 		lower = name.lower()
-		if any(name.endswith(s) for s in _STATUS_SUFFIXES):
+		if any(lower.endswith(s) for s in _STATUS_SUFFIXES_LOWER):
 			return False
 		if 'is typing' in lower or 'are typing' in lower:
 			return False
@@ -470,9 +473,14 @@ class AppModule(appModuleHandler.AppModule):
 
 	def event_alert(self, obj, nextHandler):
 		try:
-			text = (obj.name or "") or (obj.value or "")
+			text = obj.name or ""
 		except Exception:
 			text = ""
+		if not text:
+			try:
+				text = obj.value or ""
+			except Exception:
+				text = ""
 		if text:
 			self._filterAndAnnounce(text)
 		nextHandler()

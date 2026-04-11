@@ -53,6 +53,29 @@ class TestScheduleAnnounce:
         app_module._scheduleAnnounce("msg two")
         assert app_module._lastText == "msg two"
 
+    def test_disabled_does_not_update_last_text(self, app_module):
+        """`_lastText` must NOT be updated while disabled — so re-enabling
+        announces the message the user missed rather than suppressing it."""
+        app_module._announceEnabled = False
+        app_module._doAnnounce = MagicMock()
+        original_last = app_module._lastText
+        app_module._scheduleAnnounce("a new message while disabled")
+        assert app_module._lastText == original_last
+
+    def test_message_announced_after_re_enable(self, app_module):
+        """A message received while disabled must be announced once re-enabled."""
+        spy = MagicMock()
+        app_module._doAnnounce = spy
+        # Disable and receive a message — must NOT announce and must NOT update lastText
+        app_module._announceEnabled = False
+        app_module._scheduleAnnounce("hello from someone")
+        spy.assert_not_called()
+        assert app_module._lastText != "hello from someone"
+        # Re-enable — same message arrives again via poll
+        app_module._announceEnabled = True
+        app_module._scheduleAnnounce("hello from someone")
+        spy.assert_called_once_with("hello from someone")
+
 
 # ---------------------------------------------------------------------------
 # Formatting — _doAnnounce

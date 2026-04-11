@@ -67,6 +67,20 @@ class TestLifecycle:
 
 
 # ---------------------------------------------------------------------------
+# Terminated guard in _uiaRead
+# ---------------------------------------------------------------------------
+
+class TestTerminatedGuard:
+    def test_uia_read_skips_when_terminated(self, app_module):
+        """_uiaRead queued via wx.CallAfter must be a no-op after terminate()."""
+        app_module._terminated = True
+        spy = MagicMock()
+        app_module._getLatestMessageViaUIA = spy
+        app_module._uiaRead()
+        spy.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
 # Foreground guard in _uiaRead
 # ---------------------------------------------------------------------------
 
@@ -222,3 +236,38 @@ class TestEventHandlers:
         app_module._filterAndAnnounce = spy
         app_module.event_alert(obj, MagicMock())
         spy.assert_called_once_with("fallback text")
+
+    @pytest.mark.parametrize("handler_name", [
+        'event_UIA_liveRegionChange',
+        'event_liveRegionChange',
+    ])
+    def test_live_region_com_error_does_not_crash(self, app_module, handler_name):
+        """COMError on obj.name must be swallowed, not propagated."""
+        obj = MagicMock()
+        obj.name = property(lambda self: (_ for _ in ()).throw(OSError("COMError")))
+        type(obj).name = property(lambda self: (_ for _ in ()).throw(OSError("COMError")))
+        spy = MagicMock()
+        app_module._filterAndAnnounce = spy
+        # Must not raise
+        getattr(app_module, handler_name)(obj, MagicMock())
+        spy.assert_not_called()
+
+    def test_alert_com_error_on_name_still_uses_value(self, app_module):
+        """If obj.name throws, event_alert must still try obj.value."""
+        obj = MagicMock()
+        type(obj).name = property(lambda self: (_ for _ in ()).throw(OSError("COMError")))
+        obj.value = "value fallback"
+        spy = MagicMock()
+        app_module._filterAndAnnounce = spy
+        app_module.event_alert(obj, MagicMock())
+        spy.assert_called_once_with("value fallback")
+
+    def test_alert_com_error_on_both_does_not_crash(self, app_module):
+        """COMError on both obj.name and obj.value must not propagate."""
+        obj = MagicMock()
+        type(obj).name = property(lambda self: (_ for _ in ()).throw(OSError("COMError")))
+        type(obj).value = property(lambda self: (_ for _ in ()).throw(OSError("COMError")))
+        spy = MagicMock()
+        app_module._filterAndAnnounce = spy
+        app_module.event_alert(obj, MagicMock())  # must not raise
+        spy.assert_not_called()
