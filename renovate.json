@@ -1,0 +1,17 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": ["config:recommended"],
+  "pinDigests": true,
+  "packageRules": [
+    {
+      "matchManagers": ["github-actions"],
+      "automerge": false,
+      "labels": ["dependencies", "github-actions"]
+    },
+    {
+      "matchManagers": ["pip_requirements"],
+      "automerge": false,
+      "labels": ["dependencies", "python"]
+    }
+  ]
+}
