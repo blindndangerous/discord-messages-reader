@@ -18,6 +18,7 @@ import ctypes.wintypes
 import re
 import time
 import wx
+import core
 import appModuleHandler
 from logHandler import log
 import UIAHandler
@@ -121,7 +122,7 @@ class AppModule(appModuleHandler.AppModule):
 
     def _schedulePoll(self):
         if not self._terminated:
-            self._pollTimer = wx.CallLater(_POLL_INTERVAL_MS, self._pollTick)
+            self._pollTimer = core.callLater(_POLL_INTERVAL_MS, self._pollTick)
 
     def _pollTick(self):
         self._pollTimer = None
@@ -149,6 +150,48 @@ class AppModule(appModuleHandler.AppModule):
         except Exception as e:
             log.warning("DiscordMessages: uiaRead error: %s" % e)
 
+    _cachedMsgList = None
+
+    def _getMsgListViaUIA(self, uia):
+        """Finds and caches the Discord message list UIA element."""
+        if self._cachedMsgList:
+            try:
+                # Verify cache is still valid by accessing a property
+                n = self._cachedMsgList.GetCurrentPropertyValue(_UIA_NamePropertyId) or ""
+                if "messages in" in n.lower():
+                    return self._cachedMsgList
+            except Exception:
+                self._cachedMsgList = None
+
+        hwnd = self._discordHwnd
+        if not hwnd:
+            import api
+            fg = api.getForegroundObject()
+            if fg and fg.appModule is self:
+                hwnd = fg.windowHandle
+                self._discordHwnd = hwnd
+        if not hwnd:
+            return None
+
+        root = uia.ElementFromHandle(hwnd)
+        if not root:
+            return None
+
+        condition = uia.CreatePropertyCondition(
+            _UIA_ControlTypePropertyId, _UIA_ListControlTypeId
+        )
+        lists = root.FindAll(_UIA_TreeScope_Descendants, condition)
+        if not lists or lists.Length == 0:
+            return None
+
+        for i in range(lists.Length):
+            elem = lists.GetElement(i)
+            n = elem.GetCurrentPropertyValue(_UIA_NamePropertyId) or ""
+            if "messages in" in n.lower():
+                self._cachedMsgList = elem
+                return elem
+        return None
+
     def _getLatestMessageViaUIA(self):
         """Walk Discord's UIA tree and return the text of the latest message."""
         try:
@@ -156,37 +199,7 @@ class AppModule(appModuleHandler.AppModule):
             if not uia:
                 return None
 
-            hwnd = self._discordHwnd
-            if not hwnd:
-                import api
-                fg = api.getForegroundObject()
-                if fg and fg.appModule is self:
-                    hwnd = fg.windowHandle
-                    self._discordHwnd = hwnd
-            if not hwnd:
-                return None
-
-            root = uia.ElementFromHandle(hwnd)
-            if not root:
-                return None
-
-            # Find all List controls then pick the one named "Messages in …".
-            # Discord's sidebar also has a "Direct Messages" list — we skip it.
-            condition = uia.CreatePropertyCondition(
-                _UIA_ControlTypePropertyId, _UIA_ListControlTypeId
-            )
-            lists = root.FindAll(_UIA_TreeScope_Descendants, condition)
-            if not lists or lists.Length == 0:
-                return None
-
-            msgList = None
-            for i in range(lists.Length):
-                elem = lists.GetElement(i)
-                n = elem.GetCurrentPropertyValue(_UIA_NamePropertyId) or ""
-                if "messages in" in n.lower():
-                    msgList = elem
-                    break
-
+            msgList = self._getMsgListViaUIA(uia)
             if not msgList:
                 return None
 
@@ -292,34 +305,7 @@ class AppModule(appModuleHandler.AppModule):
             if not uia:
                 return []
 
-            hwnd = self._discordHwnd
-            if not hwnd:
-                import api
-                fg = api.getForegroundObject()
-                if fg and fg.appModule is self:
-                    hwnd = fg.windowHandle
-                    self._discordHwnd = hwnd
-            if not hwnd:
-                return []
-
-            root = uia.ElementFromHandle(hwnd)
-            if not root:
-                return []
-
-            condition = uia.CreatePropertyCondition(
-                _UIA_ControlTypePropertyId, _UIA_ListControlTypeId
-            )
-            lists = root.FindAll(_UIA_TreeScope_Descendants, condition)
-            if not lists or lists.Length == 0:
-                return []
-
-            msgList = None
-            for i in range(lists.Length):
-                elem = lists.GetElement(i)
-                n = elem.GetCurrentPropertyValue(_UIA_NamePropertyId) or ""
-                if "messages in" in n.lower():
-                    msgList = elem
-                    break
+            msgList = self._getMsgListViaUIA(uia)
             if not msgList:
                 return []
 
