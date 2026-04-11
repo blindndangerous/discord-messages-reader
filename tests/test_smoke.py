@@ -27,17 +27,32 @@ class TestLifecycle:
             m._hook = None
             m._pollTimer = None
 
-    def test_init_starts_poll_timer(self):
+    def test_init_queues_poll_via_callafter(self):
+        """__init__ must use wx.CallAfter so it is safe on non-main threads."""
         with patch('ctypes.windll') as mock_windll, \
-             patch('wx.CallLater', return_value=MagicMock()) as mock_timer, \
-             patch('wx.CallAfter'):
+             patch('wx.CallLater', return_value=MagicMock()), \
+             patch('wx.CallAfter') as mock_after:
             mock_windll.user32.SetWinEventHook.return_value = 0xBEEF
             from discord import AppModule
             m = AppModule()
-            assert mock_timer.called
+            # _schedulePoll must post to the main thread, not create the timer directly
+            assert mock_after.called
             m._terminated = True
             m._hook = None
             m._pollTimer = None
+
+    def test_start_poll_timer_creates_callLater(self, app_module):
+        """_startPollTimer is the only place wx.CallLater is created."""
+        with patch('wx.CallLater', return_value=MagicMock()) as mock_timer:
+            app_module._terminated = False
+            app_module._startPollTimer()
+            assert mock_timer.called
+
+    def test_start_poll_timer_skips_when_terminated(self, app_module):
+        with patch('wx.CallLater', return_value=MagicMock()) as mock_timer:
+            app_module._terminated = True
+            app_module._startPollTimer()
+            mock_timer.assert_not_called()
 
     def test_terminate_unhooks_winevent(self, app_module):
         with patch('ctypes.windll') as mock_windll:

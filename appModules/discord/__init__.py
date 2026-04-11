@@ -125,6 +125,18 @@ class AppModule(appModuleHandler.AppModule):
 	# ------------------------------------------------------------------ #
 
 	def _schedulePoll(self):
+		"""Queue timer creation on the main wx thread.
+
+		Safe to call from any thread — wx.CallAfter posts to the main thread's
+		event loop, satisfying wx's requirement that timers are started from the
+		main thread.  This matters when NVDA creates the AppModule on a worker
+		thread (Dummy-N) because Discord launched after NVDA was already running.
+		"""
+		if not self._terminated:
+			wx.CallAfter(self._startPollTimer)
+
+	def _startPollTimer(self):
+		"""Create the wx.CallLater timer — must only run on the main thread."""
 		if not self._terminated:
 			self._pollTimer = wx.CallLater(_POLL_INTERVAL_MS, self._pollTick)
 
