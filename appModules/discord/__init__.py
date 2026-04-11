@@ -446,7 +446,10 @@ class AppModule(appModuleHandler.AppModule):
 
 	def event_UIA_liveRegionChange(self, obj, nextHandler):
 		"""UIA live region — fires if Discord publishes UIA live updates."""
-		name = obj.name or ""
+		try:
+			name = obj.name or ""
+		except Exception:
+			name = ""
 		if name and name != "(empty message)":
 			lower = name.lower()
 			if 'is typing' not in lower and 'are typing' not in lower:
@@ -455,7 +458,10 @@ class AppModule(appModuleHandler.AppModule):
 
 	def event_liveRegionChange(self, obj, nextHandler):
 		"""IAccessible live region change — fallback."""
-		name = obj.name or ""
+		try:
+			name = obj.name or ""
+		except Exception:
+			name = ""
 		if name and name != "(empty message)":
 			lower = name.lower()
 			if 'is typing' not in lower and 'are typing' not in lower:
@@ -463,7 +469,10 @@ class AppModule(appModuleHandler.AppModule):
 		nextHandler()
 
 	def event_alert(self, obj, nextHandler):
-		text = (obj.name or "") or (obj.value or "")
+		try:
+			text = (obj.name or "") or (obj.value or "")
+		except Exception:
+			text = ""
 		if text:
 			self._filterAndAnnounce(text)
 		nextHandler()
