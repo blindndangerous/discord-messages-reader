@@ -28,11 +28,22 @@ No configuration is required. Once installed:
 - Announcements only happen when Discord is the active (foreground) window.
 - Typing indicators and status changes are filtered out silently.
 
+### Keyboard Shortcuts
+
+| Gesture | Action |
+|---|---|
+| `NVDA+Shift+D` | Toggle automatic announcements on or off |
+| `Alt+1` | Read the most recent message |
+| `Alt+2` through `Alt+9` | Read the 2nd through 9th most recent message |
+| `Alt+0` | Read the 10th most recent message |
+
+All gestures appear under **Discord Messages Reader** in NVDA's Input Gestures dialog and can be rebound there.
+
 ## Known Limitations
 
 - Messages are announced up to 500 milliseconds after they appear in Discord's UI, which is the polling interval.
 - The add-on reads the most recently visible message. If several messages arrive in rapid succession during a polling gap, only the last one is announced.
-- The add-on only announces messages when Discord is the foreground application. Messages received while you are in another application are not announced.
+- Automatic announcements only occur when Discord is the foreground application. Use `Alt+1`–`Alt+0` to catch up on messages received while Discord was in the background.
 
 ## Supported Discord Builds
 
