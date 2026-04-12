@@ -20,7 +20,7 @@ dev = [
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-addopts = "--cov=appModules --cov-report=term-missing --basetemp=.pytest_tmp"
+addopts = "--cov=appModules --cov-report=term-missing --cov-report=xml --basetemp=.pytest_tmp"
 
 [tool.coverage.run]
 source = ["appModules"]

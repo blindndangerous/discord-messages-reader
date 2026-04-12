@@ -1,3 +1,6 @@
+![CI](https://github.com/blindndangerous/discord-messages-reader/actions/workflows/ci.yml/badge.svg)
+[![codecov](https://codecov.io/gh/blindndangerous/discord-messages-reader/graph/badge.svg)](https://codecov.io/gh/blindndangerous/discord-messages-reader)
+
 # Discord Messages Reader
 
 An NVDA add-on that automatically announces incoming Discord chat messages as they arrive, without requiring you to navigate away from what you are doing.
