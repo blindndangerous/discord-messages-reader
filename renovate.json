@@ -4,6 +4,10 @@
   "pinDigests": true,
   "packageRules": [
     {
+      "matchDepTypes": ["devDependencies"],
+      "automerge": true
+    },
+    {
       "matchManagers": ["github-actions"],
       "automerge": false,
       "labels": ["dependencies", "github-actions"]
@@ -13,5 +17,9 @@
       "automerge": false,
       "labels": ["dependencies", "python"]
     }
-  ]
+  ],
+  "lockFileMaintenance": {
+    "enabled": true,
+    "schedule": ["before 5am on Monday"]
+  }
 }

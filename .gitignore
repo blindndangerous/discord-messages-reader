@@ -1,17 +1,39 @@
 # Distribution builds
 dist/
 
-# Python cache
+# Python cache / bytecode
 __pycache__/
-*.pyc
+*.py[cod]
 *.pyo
 
-# Pytest cache
+# Virtual environment
+.venv/
+.uv/
+
+# Package metadata
+*.egg-info/
+
+# Tool caches
+.mypy_cache/
+.ruff_cache/
 .pytest_cache/
+.pytest_tmp/
+
+# Coverage
+.coverage
+htmlcov/
+
+# Test temp files
+tmp/
 
 # Old addon file at project root (replaced by dist/)
 *.nvda-addon
 
-# Editor / OS
+# Editor
+.vscode/
+.idea/
+*.swp
+
+# OS
 .DS_Store
 Thumbs.db

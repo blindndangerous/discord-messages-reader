@@ -11,19 +11,25 @@ permissions:
 
 jobs:
   lint:
-    name: ruff
+    name: ruff + mypy
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v5
         with:
           enable-cache: true
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version-file: pyproject.toml
       - name: Install dependencies
-        run: uv sync
+        run: uv sync --all-extras
       - name: Ruff — lint
         run: uv run ruff check .
       - name: Ruff — format check (tests only)
         run: uv run ruff format tests/ --check
+      - name: Mypy — type check
+        run: uv run mypy appModules/discord/
 
   security:
     name: bandit + pip-audit
@@ -33,8 +39,12 @@ jobs:
       - uses: astral-sh/setup-uv@v5
         with:
           enable-cache: true
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version-file: pyproject.toml
       - name: Install dependencies
-        run: uv sync
+        run: uv sync --all-extras
       - name: Bandit — security scan
         run: uv run bandit -r appModules/ -c pyproject.toml
       - name: pip-audit — dependency CVE scan
@@ -45,14 +55,11 @@ jobs:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
-
       - uses: astral-sh/setup-uv@v5
         with:
           enable-cache: true
-          python-version: "3.13"
-
+          python-version-file: pyproject.toml
       - name: Install dependencies
-        run: uv sync
-
+        run: uv sync --all-extras
       - name: Pytest — test suite with coverage
         run: uv run pytest --tb=short
