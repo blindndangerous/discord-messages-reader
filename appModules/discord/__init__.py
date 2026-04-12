@@ -13,11 +13,14 @@ The WinEvent hook is kept as a fast-path trigger: when it fires (e.g. from
 the message list being active), it triggers an immediate UIA read instead of
 waiting for the next poll cycle.
 """
+from __future__ import annotations
+
 import contextlib
 import ctypes
 import ctypes.wintypes
 import re
 import time
+from typing import Any
 
 import appModuleHandler
 import core
@@ -67,7 +70,7 @@ class AppModule(appModuleHandler.AppModule):
 	_pollTimer = None
 	_terminated: bool = False
 
-	def __init__(self, *args, **kwargs):
+	def __init__(self, *args: Any, **kwargs: Any) -> None:
 		super().__init__(*args, **kwargs)
 		log.info(f"DiscordMessages: loaded (PID {self.processID})")
 
@@ -91,7 +94,7 @@ class AppModule(appModuleHandler.AppModule):
 		# Start UIA polling — primary mechanism
 		self._schedulePoll()
 
-	def terminate(self):
+	def terminate(self) -> None:
 		self._terminated = True
 		if self._pollTimer is not None:
 			with contextlib.suppress(Exception):
@@ -106,7 +109,7 @@ class AppModule(appModuleHandler.AppModule):
 	# IAccessible WinEvent hook — fast-path trigger                       #
 	# ------------------------------------------------------------------ #
 
-	def _winEventCallback(self, hHook, event, hwnd, idObject, idChild, thread, time_ms):
+	def _winEventCallback(self, hHook: Any, event: Any, hwnd: Any, idObject: Any, idChild: Any, thread: Any, time_ms: Any) -> None:
 		try:
 			# Only store a non-zero hwnd; zero is not a valid window handle.
 			if not self._discordHwnd and hwnd:
@@ -124,7 +127,7 @@ class AppModule(appModuleHandler.AppModule):
 	# UIA polling — primary message detection                             #
 	# ------------------------------------------------------------------ #
 
-	def _schedulePoll(self):
+	def _schedulePoll(self) -> None:
 		"""Schedule the next UIA poll.
 
 		core.callLater is thread-safe — it posts to the main thread internally,
@@ -134,13 +137,13 @@ class AppModule(appModuleHandler.AppModule):
 		if not self._terminated:
 			self._pollTimer = core.callLater(_POLL_INTERVAL_MS, self._pollTick)
 
-	def _pollTick(self):
+	def _pollTick(self) -> None:
 		self._pollTimer = None
 		if not self._terminated:
 			self._uiaRead()
 			self._schedulePoll()
 
-	def _uiaRead(self):
+	def _uiaRead(self) -> None:
 		"""Read the latest message from Discord's UIA tree; announce if new."""
 		if self._terminated:
 			return
@@ -165,7 +168,7 @@ class AppModule(appModuleHandler.AppModule):
 	_cachedMsgList = None
 	_cachedMsgListName = None
 
-	def _getMsgListViaUIA(self, uia):
+	def _getMsgListViaUIA(self, uia: Any) -> Any:
 		"""Find and cache the Discord message list UIA element.
 
 		On a cache hit the expensive FindAll tree walk is skipped entirely.
@@ -214,7 +217,7 @@ class AppModule(appModuleHandler.AppModule):
 				return elem
 		return None
 
-	def _getLatestMessageViaUIA(self):
+	def _getLatestMessageViaUIA(self) -> str | None:
 		"""Walk Discord's UIA tree and return the text of the latest message."""
 		try:
 			uia = UIAHandler.handler.clientObject
@@ -263,7 +266,7 @@ class AppModule(appModuleHandler.AppModule):
 	# Filtering and announcement                                          #
 	# ------------------------------------------------------------------ #
 
-	def _filterAndAnnounce(self, name):
+	def _filterAndAnnounce(self, name: str) -> None:
 		lower = name.lower()
 
 		if any(lower.endswith(s) for s in _STATUS_SUFFIXES_LOWER):
@@ -287,7 +290,7 @@ class AppModule(appModuleHandler.AppModule):
 			return
 		self._scheduleAnnounce(name)
 
-	def _scheduleAnnounce(self, text):
+	def _scheduleAnnounce(self, text: str) -> None:
 		if text == self._lastText:
 			return
 		if not self._announceEnabled:
@@ -296,7 +299,7 @@ class AppModule(appModuleHandler.AppModule):
 		log.debug(f"DiscordMessages: announcing {text[:80]!r}")
 		self._doAnnounce(text)
 
-	def _doAnnounce(self, text):
+	def _doAnnounce(self, text: str) -> None:
 		# IAccessible format → "username: body"
 		if ' , ' in text:
 			parts = text.split(' , ')
@@ -317,7 +320,7 @@ class AppModule(appModuleHandler.AppModule):
 	# History reading — Alt+1 through Alt+0                              #
 	# ------------------------------------------------------------------ #
 
-	def _isValidMessage(self, name):
+	def _isValidMessage(self, name: str) -> bool:
 		"""Return True if *name* looks like a real chat message."""
 		lower = name.lower()
 		if any(lower.endswith(s) for s in _STATUS_SUFFIXES_LOWER):
@@ -332,7 +335,7 @@ class AppModule(appModuleHandler.AppModule):
 			return bool(body)
 		return len(name) >= 3 and not _TIMESTAMP_RE.match(name.strip())
 
-	def _getMessagesViaUIA(self, count=10):
+	def _getMessagesViaUIA(self, count: int = 10) -> list[str]:
 		"""Walk the UIA tree and return up to *count* recent messages (oldest first)."""
 		try:
 			uia = UIAHandler.handler.clientObject
@@ -383,7 +386,7 @@ class AppModule(appModuleHandler.AppModule):
 			log.warning(f"DiscordMessages: getMessages error: {e}")
 			return []
 
-	def _readNthLastMessage(self, n):
+	def _readNthLastMessage(self, n: int) -> None:
 		"""Speak the Nth-last message (1 = most recent, 10 = oldest of last ten)."""
 		import api
 		try:
@@ -409,47 +412,47 @@ class AppModule(appModuleHandler.AppModule):
 			return
 		self._doAnnounce(messages[idx])
 
-	def script_readMessage1(self, gesture):
+	def script_readMessage1(self, gesture: Any) -> None:
 		"""Read the most recent message."""
 		self._readNthLastMessage(1)
 
-	def script_readMessage2(self, gesture):
+	def script_readMessage2(self, gesture: Any) -> None:
 		"""Read the 2nd most recent message."""
 		self._readNthLastMessage(2)
 
-	def script_readMessage3(self, gesture):
+	def script_readMessage3(self, gesture: Any) -> None:
 		"""Read the 3rd most recent message."""
 		self._readNthLastMessage(3)
 
-	def script_readMessage4(self, gesture):
+	def script_readMessage4(self, gesture: Any) -> None:
 		"""Read the 4th most recent message."""
 		self._readNthLastMessage(4)
 
-	def script_readMessage5(self, gesture):
+	def script_readMessage5(self, gesture: Any) -> None:
 		"""Read the 5th most recent message."""
 		self._readNthLastMessage(5)
 
-	def script_readMessage6(self, gesture):
+	def script_readMessage6(self, gesture: Any) -> None:
 		"""Read the 6th most recent message."""
 		self._readNthLastMessage(6)
 
-	def script_readMessage7(self, gesture):
+	def script_readMessage7(self, gesture: Any) -> None:
 		"""Read the 7th most recent message."""
 		self._readNthLastMessage(7)
 
-	def script_readMessage8(self, gesture):
+	def script_readMessage8(self, gesture: Any) -> None:
 		"""Read the 8th most recent message."""
 		self._readNthLastMessage(8)
 
-	def script_readMessage9(self, gesture):
+	def script_readMessage9(self, gesture: Any) -> None:
 		"""Read the 9th most recent message."""
 		self._readNthLastMessage(9)
 
-	def script_readMessage10(self, gesture):
+	def script_readMessage10(self, gesture: Any) -> None:
 		"""Read the 10th most recent message."""
 		self._readNthLastMessage(10)
 
-	def script_toggleAnnounce(self, gesture):
+	def script_toggleAnnounce(self, gesture: Any) -> None:
 		"""Toggle automatic announcement of incoming messages on or off."""
 		self._announceEnabled = not self._announceEnabled
 		state = "on" if self._announceEnabled else "off"
@@ -477,13 +480,13 @@ class AppModule(appModuleHandler.AppModule):
 	# NVDA event handlers                                                 #
 	# ------------------------------------------------------------------ #
 
-	def event_valueChange(self, obj, nextHandler):
+	def event_valueChange(self, obj: Any, nextHandler: Any) -> None:
 		"""Suppress Discord's edit-field clearing from cancelling our announcement."""
 		if time.time() - self._lastHookTime < 2.0:
 			return
 		nextHandler()
 
-	def event_UIA_liveRegionChange(self, obj, nextHandler):
+	def event_UIA_liveRegionChange(self, obj: Any, nextHandler: Any) -> None:
 		"""UIA live region — fires if Discord publishes UIA live updates."""
 		try:
 			name = obj.name or ""
@@ -495,7 +498,7 @@ class AppModule(appModuleHandler.AppModule):
 				self._filterAndAnnounce(name)
 		nextHandler()
 
-	def event_liveRegionChange(self, obj, nextHandler):
+	def event_liveRegionChange(self, obj: Any, nextHandler: Any) -> None:
 		"""IAccessible live region change — fallback."""
 		try:
 			name = obj.name or ""
@@ -507,7 +510,7 @@ class AppModule(appModuleHandler.AppModule):
 				self._filterAndAnnounce(name)
 		nextHandler()
 
-	def event_alert(self, obj, nextHandler):
+	def event_alert(self, obj: Any, nextHandler: Any) -> None:
 		try:
 			text = obj.name or ""
 		except Exception:
