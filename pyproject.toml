@@ -69,6 +69,7 @@ indent-style = "space"
 
 [tool.mypy]
 python_version = "3.13"
+platform = "linux"               # match CI; keeps windll/WINFUNCTYPE ignores from being "unused" on Windows
 files = ["appModules/discord"]
 strict = false
 ignore_missing_imports = true    # NVDA and win32 libs have no stubs

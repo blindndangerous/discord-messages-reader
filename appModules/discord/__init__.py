@@ -31,7 +31,7 @@ from logHandler import log
 EVENT_OBJECT_NAMECHANGE = 0x800C
 WINEVENT_OUTOFCONTEXT   = 0x0000
 
-_WinEventProcType = ctypes.WINFUNCTYPE(
+_WinEventProcType = ctypes.WINFUNCTYPE(  # type: ignore[attr-defined]
 	None,
 	ctypes.wintypes.HANDLE,
 	ctypes.wintypes.DWORD,
@@ -77,7 +77,7 @@ class AppModule(appModuleHandler.AppModule):
 		# IAccessible WinEvent hook — fast-path trigger when IAccessible is active.
 		# Must hold a reference to _hookProc or the GC will free the ctypes callback.
 		self._hookProc = _WinEventProcType(self._winEventCallback)
-		self._hook = ctypes.windll.user32.SetWinEventHook(
+		self._hook = ctypes.windll.user32.SetWinEventHook(  # type: ignore[attr-defined]
 			EVENT_OBJECT_NAMECHANGE,
 			EVENT_OBJECT_NAMECHANGE,
 			None,
@@ -101,7 +101,7 @@ class AppModule(appModuleHandler.AppModule):
 				self._pollTimer.Stop()
 			self._pollTimer = None
 		if getattr(self, '_hook', None):
-			ctypes.windll.user32.UnhookWinEvent(self._hook)
+			ctypes.windll.user32.UnhookWinEvent(self._hook)  # type: ignore[attr-defined]
 			self._hook = None
 		super().terminate()
 
