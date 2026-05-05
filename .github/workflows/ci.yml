@@ -64,7 +64,10 @@ jobs:
         run: uv run bandit -r appModules/ -c pyproject.toml
 
       - name: pip-audit — dependency CVE scan
-        run: uv run pip-audit
+        # CVE-2026-3219 / CVE-2026-6357 affect the `pip` CLI itself, not
+        # this project's runtime deps.  Ignored until upstream ships a fix
+        # available via uv.
+        run: uv run pip-audit --ignore-vuln CVE-2026-3219 --ignore-vuln CVE-2026-6357
 
   test:
     name: pytest (Python 3.13)
