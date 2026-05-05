@@ -1,0 +1,169 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  verify-tag:
+    name: Verify tag matches CHANGELOG + manifest
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - name: Confirm tag has CHANGELOG entry
+        run: |
+          tag="${GITHUB_REF#refs/tags/v}"
+          if ! grep -q "^## \[$tag\]" CHANGELOG.md; then
+            echo "::error::Tag v$tag has no CHANGELOG entry"
+            exit 1
+          fi
+      - name: Confirm tag matches manifest.ini version
+        run: |
+          tag="${GITHUB_REF#refs/tags/v}"
+          version=$(grep -E '^version' manifest.ini | head -1 | sed -E 's/version *= *"?([^" ]+)"?/\1/')
+          if [ "$tag" != "$version" ]; then
+            echo "::error::Tag v$tag does not match manifest.ini version $version"
+            exit 1
+          fi
+
+  test:
+    name: Test on release commit
+    needs: verify-tag
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - name: Install uv
+        uses: astral-sh/setup-uv@v8.1.0
+        with:
+          enable-cache: true
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version-file: pyproject.toml
+      - name: Install dependencies
+        run: uv sync --all-extras
+      - name: Pre-commit
+        run: uv run pre-commit run --all-files --show-diff-on-failure
+      - name: Pytest
+        run: uv run pytest --tb=short
+
+  sbom:
+    name: Generate SBOM
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - name: Generate CycloneDX SBOM
+        uses: anchore/sbom-action@v0
+        with:
+          format: cyclonedx-json
+          output-file: sbom.cdx.json
+      - name: Generate SPDX SBOM
+        uses: anchore/sbom-action@v0
+        with:
+          format: spdx-json
+          output-file: sbom.spdx.json
+      - name: Upload SBOMs
+        uses: actions/upload-artifact@v7
+        with:
+          name: sbom
+          path: |
+            sbom.cdx.json
+            sbom.spdx.json
+          retention-days: 90
+
+  build:
+    name: Build .nvda-addon
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - name: Install uv
+        uses: astral-sh/setup-uv@v8.1.0
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version-file: pyproject.toml
+      - name: Build addon
+        run: uv run python build.py
+      - name: Upload addon artefact
+        uses: actions/upload-artifact@v7
+        with:
+          name: dist
+          path: dist/*.nvda-addon
+          retention-days: 90
+
+  release:
+    name: GitHub release
+    needs: [build, sbom]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      id-token: write
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Download artifacts
+        uses: actions/download-artifact@v8
+        with:
+          path: ./artefacts
+
+      - name: Install cosign
+        uses: sigstore/cosign-installer@v4.1.1
+
+      - name: Sign artefacts (keyless via OIDC)
+        run: |
+          shopt -s nullglob
+          for f in ./artefacts/dist/* ./artefacts/sbom/*; do
+            [ -f "$f" ] || continue
+            cosign sign-blob --yes \
+              --bundle "$f.bundle" \
+              --output-signature "$f.sig" \
+              "$f"
+          done
+
+      - name: Extract release notes from CHANGELOG
+        run: |
+          tag="${GITHUB_REF#refs/tags/v}"
+          awk -v tag="$tag" '
+            /^## \[/ {
+              if (capture) exit
+              if (index($0, "[" tag "]")) { capture=1; next }
+            }
+            capture { print }
+          ' CHANGELOG.md > CHANGELOG_RELEASE.md
+          if [ ! -s CHANGELOG_RELEASE.md ]; then
+            echo "::error::Empty release notes for $tag"
+            exit 1
+          fi
+
+      - name: Create GitHub release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" \
+            --title "$GITHUB_REF_NAME" \
+            --notes-file CHANGELOG_RELEASE.md \
+            --verify-tag \
+            ./artefacts/dist/* \
+            ./artefacts/sbom/* \
+            ./artefacts/dist/*.bundle \
+            ./artefacts/dist/*.sig \
+            ./artefacts/sbom/*.bundle \
+            ./artefacts/sbom/*.sig
