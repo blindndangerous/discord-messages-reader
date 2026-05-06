@@ -1,0 +1,14 @@
+# Normalize line endings to LF in the repo, checkout as-is on all platforms
+* text=auto eol=lf
+
+# Binary files - never touch line endings
+*.nvda-addon binary
+*.zip        binary
+*.png        binary
+*.jpg        binary
+*.ico        binary
+*.wav        binary
+*.mp3        binary
+*.ttf        binary
+*.dll        binary
+*.pyd        binary
