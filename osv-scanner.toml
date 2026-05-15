@@ -7,10 +7,6 @@ id = "GHSA-jp4c-xjxw-mgf9"
 reason = "pip CLI vuln, fix in pip 26.1; uv pulls latest. Not exploitable from addon code."
 
 [[IgnoredVulns]]
-id = "PYSEC-2023-117"
-reason = "pygments dev-only transitive; not shipped in the .nvda-addon."
-
-[[IgnoredVulns]]
 id = "GHSA-mrwq-x4v8-fh7p"
 reason = "pygments dev-only transitive; not shipped in the .nvda-addon."
 
