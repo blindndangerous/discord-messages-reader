@@ -190,6 +190,51 @@ class TestGrandchildFallback:
         result = app_module._getLatestMessageViaUIA()
         assert result == "dave , sup , 12:00 PM"
 
+    def test_skips_invalid_latest_child_and_returns_previous_message(self, uia_ctx):
+        """A bottom typing/status item must not hide the newest real message."""
+        app_module, uia = uia_ctx
+        root = MagicMock()
+        uia.ElementFromHandle.return_value = root
+        uia.CreatePropertyCondition.return_value = MagicMock()
+
+        msg_list = _make_elem("Messages in #general")
+        root.FindAll.return_value = _make_elem_array(msg_list)
+
+        typing_indicator = _make_elem("Alice is typing...")
+        real_message = _make_elem("bob , actual message , 12:00 PM")
+
+        walker = MagicMock()
+        walker.GetLastChildElement.side_effect = lambda e: typing_indicator if e is msg_list else None
+        walker.GetPreviousSiblingElement.side_effect = lambda e: real_message if e is typing_indicator else None
+        uia.RawViewWalker = walker
+
+        result = app_module._getLatestMessageViaUIA()
+        assert result == "bob , actual message , 12:00 PM"
+
+    def test_skips_invalid_grandchild_and_returns_previous_message(self, uia_ctx):
+        """An invalid named grandchild must not stop the backwards scan."""
+        app_module, uia = uia_ctx
+        root = MagicMock()
+        uia.ElementFromHandle.return_value = root
+        uia.CreatePropertyCondition.return_value = MagicMock()
+
+        msg_list = _make_elem("Messages in #general")
+        root.FindAll.return_value = _make_elem_array(msg_list)
+
+        container = _make_elem("")
+        timestamp = _make_elem("12:00 PM")
+        real_message = _make_elem("bob , actual message , 12:00 PM")
+
+        walker = MagicMock()
+        walker.GetLastChildElement.side_effect = lambda e: (
+            container if e is msg_list else timestamp if e is container else None
+        )
+        walker.GetPreviousSiblingElement.side_effect = lambda e: real_message if e is container else None
+        uia.RawViewWalker = walker
+
+        result = app_module._getLatestMessageViaUIA()
+        assert result == "bob , actual message , 12:00 PM"
+
     def test_returns_none_after_ten_empty_children(self, uia_ctx):
         """Walker must not loop forever — capped at 10 iterations."""
         app_module, uia = uia_ctx

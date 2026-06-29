@@ -44,6 +44,7 @@ _WinEventProcType = ctypes.WINFUNCTYPE(  # type: ignore[attr-defined]
 
 _STATUS_SUFFIXES = (', Online', ', Offline', ', Idle', ', Do Not Disturb', ', Streaming')
 _STATUS_SUFFIXES_LOWER = tuple(s.lower() for s in _STATUS_SUFFIXES)
+_NOISE_LABELS_LOWER = frozenset({"new"})
 
 # UIA property/type constants (from UIAutomationClient.h)
 _UIA_NamePropertyId        = 30005
@@ -246,12 +247,12 @@ class AppModule(appModuleHandler.AppModule):
 				if not child:
 					break
 				name = child.GetCurrentPropertyValue(_UIA_NamePropertyId) or ""
-				if name:
+				if name and self._isValidMessage(name):
 					return name
 				grandchild = walker.GetLastChildElement(child)
 				while grandchild:
 					gname = grandchild.GetCurrentPropertyValue(_UIA_NamePropertyId) or ""
-					if gname:
+					if gname and self._isValidMessage(gname):
 						return gname
 					grandchild = walker.GetPreviousSiblingElement(grandchild)
 				child = walker.GetPreviousSiblingElement(child)
@@ -267,8 +268,10 @@ class AppModule(appModuleHandler.AppModule):
 	# ------------------------------------------------------------------ #
 
 	def _filterAndAnnounce(self, name: str) -> None:
-		lower = name.lower()
+		lower = name.strip().lower()
 
+		if lower in _NOISE_LABELS_LOWER:
+			return
 		if any(lower.endswith(s) for s in _STATUS_SUFFIXES_LOWER):
 			return
 		if 'is typing' in lower or 'are typing' in lower:
@@ -322,7 +325,9 @@ class AppModule(appModuleHandler.AppModule):
 
 	def _isValidMessage(self, name: str) -> bool:
 		"""Return True if *name* looks like a real chat message."""
-		lower = name.lower()
+		lower = name.strip().lower()
+		if lower in _NOISE_LABELS_LOWER:
+			return False
 		if any(lower.endswith(s) for s in _STATUS_SUFFIXES_LOWER):
 			return False
 		if 'is typing' in lower or 'are typing' in lower:

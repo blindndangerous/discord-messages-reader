@@ -18,9 +18,11 @@ __pycache__/
 .ruff_cache/
 .pytest_cache/
 .pytest_tmp/
+.serena/
 
 # Coverage
 .coverage
+coverage.xml
 htmlcov/
 
 # Test temp files

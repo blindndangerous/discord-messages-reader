@@ -65,6 +65,11 @@ class TestStatusSuffixes:
         app_module._filterAndAnnounce("SomeUser" + suffix)
         spy.assert_not_called()
 
+    def test_status_suffix_with_trailing_whitespace_is_filtered(self, app_module):
+        spy = _make_filter_spy(app_module)
+        app_module._filterAndAnnounce("SomeUser, Online ")
+        spy.assert_not_called()
+
 
 # ---------------------------------------------------------------------------
 # Typing indicator filtering
@@ -128,6 +133,11 @@ class TestIAccessibleFormat:
 
 
 class TestPlainTextFormat:
+    def test_new_divider_is_filtered(self, app_module):
+        spy = _make_filter_spy(app_module)
+        app_module._filterAndAnnounce("New")
+        spy.assert_not_called()
+
     def test_short_string_is_filtered(self, app_module):
         spy = _make_filter_spy(app_module)
         app_module._filterAndAnnounce("hi")

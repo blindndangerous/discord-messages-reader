@@ -47,9 +47,9 @@ jobs:
         uses: google/osv-scanner-action/osv-scanner-action@v2.3.5
         with:
           scan-args: |-
-            --recursive
+            scan source
+            --lockfile=uv.lock
             --config=osv-scanner.toml
-            ./
 
   gitleaks:
     name: Gitleaks

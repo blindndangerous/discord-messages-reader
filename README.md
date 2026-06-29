@@ -33,12 +33,10 @@ No configuration is required. Once installed:
 
 ### Keyboard Shortcuts
 
-| Gesture | Action |
-|---|---|
-| `NVDA+Shift+D` | Toggle automatic announcements on or off |
-| `Alt+1` | Read the most recent message |
-| `Alt+2` through `Alt+9` | Read the 2nd through 9th most recent message |
-| `Alt+0` | Read the 10th most recent message |
+- `NVDA+Ctrl+Shift+D`: Toggle automatic announcements on or off.
+- `Alt+1`: Read the most recent message.
+- `Alt+2` through `Alt+9`: Read the 2nd through 9th most recent message.
+- `Alt+0`: Read the 10th most recent message.
 
 All gestures appear under **Discord Messages Reader** in NVDA's Input Gestures dialog and can be rebound there.
 
@@ -46,7 +44,7 @@ All gestures appear under **Discord Messages Reader** in NVDA's Input Gestures d
 
 - Messages are announced up to 500 milliseconds after they appear in Discord's UI, which is the polling interval.
 - The add-on reads the most recently visible message. If several messages arrive in rapid succession during a polling gap, only the last one is announced.
-- Automatic announcements only occur when Discord is the foreground application. Use `Alt+1`–`Alt+0` to catch up on messages received while Discord was in the background.
+- Automatic announcements only occur when Discord is the foreground application. Use `Alt+1` through `Alt+0` to catch up on messages received while Discord was in the background.
 
 ## Supported Discord Builds
 
@@ -56,12 +54,13 @@ All gestures appear under **Discord Messages Reader** in NVDA's Input Gestures d
 
 ## Building From Source
 
-Requires Python 3.x.
+Requires Python 3.14 and uv.
 
 ```
 git clone https://github.com/blindndangerous/discord-messages-reader.git
 cd discord-messages-reader
-python build.py
+uv sync --all-extras
+uv run python build.py
 ```
 
 The distributable add-on file is written to `dist/`.
@@ -69,8 +68,8 @@ The distributable add-on file is written to `dist/`.
 ### Running Tests
 
 ```
-pip install pytest
-pytest
+uv sync --all-extras
+uv run pytest
 ```
 
 ## License
@@ -79,5 +78,6 @@ MIT License. See [LICENSE](LICENSE) for details.
 
 ## Authors
 
-- **[blindndangerous](https://github.com/blindndangerous)** — concept, requirements, and testing
-- **[Claude Sonnet](https://claude.ai)** (Anthropic) — implementation and architecture
+- **[blindndangerous](https://github.com/blindndangerous)** - concept, requirements, and testing
+- **[Claude Sonnet](https://claude.ai)** (Anthropic) - implementation and architecture
+- **Codex** (OpenAI) - maintenance fixes and test updates

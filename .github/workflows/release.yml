@@ -53,7 +53,7 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v6
         with:
-          python-version-file: pyproject.toml
+          python-version: "3.14"
       - name: Install dependencies
         run: uv sync --all-extras
       - name: Pre-commit
@@ -97,7 +97,7 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v6
         with:
-          python-version-file: pyproject.toml
+          python-version: "3.14"
       - name: Build addon
         run: uv run python build.py
       - name: Upload addon artefact

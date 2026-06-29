@@ -74,6 +74,12 @@ class TestIsValidMessage:
     def test_are_typing_is_invalid(self, app_module):
         assert app_module._isValidMessage("alice and bob are typing...") is False
 
+    def test_status_suffix_with_trailing_whitespace_is_invalid(self, app_module):
+        assert app_module._isValidMessage("someuser, online ") is False
+
+    def test_new_divider_is_invalid(self, app_module):
+        assert app_module._isValidMessage("New") is False
+
 
 # ---------------------------------------------------------------------------
 # Fixture: wired-up UIA mock (mirrors uia_ctx from test_uia.py)
@@ -168,11 +174,13 @@ class TestGetMessagesViaUIA:
         names = [
             "alice , hello , 9:00 AM",
             "alice is typing...",  # should be filtered
+            "New",  # Discord unread divider
             "bob , world , 9:01 AM",
         ]
         _build_linear_list(uia, names)
         result = app_module._getMessagesViaUIA(count=10)
         assert "alice is typing..." not in result
+        assert "New" not in result
         assert len(result) == 2
 
 

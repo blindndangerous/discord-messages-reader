@@ -1,32 +1,40 @@
-# Discord Messages Reader — Claude Code Notes
+# Discord Messages Reader - Claude Code Notes
 
 ## Project Layout
 
 ```
 appModules/
-  discord/__init__.py       — Main AppModule (stable Discord)
-  discordptb/__init__.py    — Re-exports AppModule for Discord PTB
-  discordcanary/__init__.py — Re-exports AppModule for Discord Canary
+  discord/__init__.py       - Main AppModule (stable Discord)
+  discordptb/__init__.py    - Re-exports AppModule for Discord PTB
+  discordcanary/__init__.py - Re-exports AppModule for Discord Canary
 tests/
-  conftest.py               — NVDA stub installation + app_module fixture
-  test_filter.py            — _filterAndAnnounce unit tests
-  test_announce.py          — _scheduleAnnounce / _doAnnounce unit tests
-  test_uia.py               — _getLatestMessageViaUIA mock tests
-  test_smoke.py             — Lifecycle and event handler smoke tests
-manifest.ini                — NVDA add-on manifest
-build.py                    — Creates dist/*.nvda-addon (ZIP)
-pytest.ini                  — Runs tests from tests/ directory
+  conftest.py               - NVDA stub installation + app_module fixture
+  test_filter.py            - _filterAndAnnounce unit tests
+  test_announce.py          - _scheduleAnnounce / _doAnnounce unit tests
+  test_uia.py               - _getLatestMessageViaUIA mock tests
+  test_smoke.py             - Lifecycle and event handler smoke tests
+manifest.ini                - NVDA add-on manifest
+build.py                    - Creates dist/*.nvda-addon (ZIP)
+pyproject.toml              - Runs tests from tests/ directory and configures tooling
 ```
 
 ## Build and Test
 
 ```bash
 python build.py             # produces dist/discord_messages_reader-X.X.X.nvda-addon
-pytest                      # 131 tests, all should pass
+uv run pytest               # full unit suite
+uv run ruff check .         # lint
+uv run mypy appModules/discord/  # type check
 ```
 
 Pytest is installed at:
 `C:\Users\<username>\AppData\Roaming\Python\Python313\Scripts\pytest.exe`
+
+## GitHub Attribution
+
+For commits, PR descriptions, and release notes created with Codex, credit
+blindndangerous and Codex (OpenAI). Keep existing Claude attribution when it
+applies to older work.
 
 ## Installed Location (for rapid iteration)
 
@@ -34,10 +42,10 @@ Pytest is installed at:
 C:\Users\<username>\AppData\Roaming\nvda\addons\discord_messages_reader\appModules\discord\__init__.py
 ```
 
-After editing, deploy with:
+After editing, deploy with PowerShell:
 ```bash
-cp appModules/discord/__init__.py \
-   "$APPDATA/nvda/addons/discord_messages_reader/appModules/discord/__init__.py"
+Copy-Item appModules/discord/__init__.py `
+  "$env:APPDATA\nvda\addons\discord_messages_reader\appModules\discord\__init__.py" -Force
 ```
 Then restart NVDA (Ctrl+Alt+N) to reload.
 
@@ -50,7 +58,7 @@ Then restart NVDA (Ctrl+Alt+N) to reload.
   (used to suppress spurious `event_valueChange` when Discord clears the edit
   field after sending a message). It is debounced to avoid stacking UIA reads
   during navigation.
-- **`core.callLater`** is used for all timer scheduling — it is thread-safe
+- **`core.callLater`** is used for all timer scheduling. It is thread-safe
   (internally posts to the main thread), so `_schedulePoll` can be called from
   any thread, including the Dummy-N worker thread NVDA uses when Discord
   launches while NVDA is already running.
@@ -60,8 +68,8 @@ Then restart NVDA (Ctrl+Alt+N) to reload.
   element name changes (channel switch). Implemented in `_getMsgListViaUIA`.
 - **`disableBrowseModeByDefault = True`** suppresses NVDA's virtual buffer for
   Discord, which is the recommended approach for Electron apps.
-- **Message dedup** is content-based only (`_lastText`). No time window — the
-  UIA text includes a timestamp so genuinely new messages always differ.
+- **Message dedup** is content-based only (`_lastText`). The UIA text includes
+  a timestamp, so genuinely new messages always differ.
 - **Foreground guard** in `_uiaRead` prevents announcements when Discord is
   not the active window.
 

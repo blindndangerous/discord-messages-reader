@@ -1,9 +1,9 @@
 [project]
 name = "discord-messages-reader"
-version = "0.1.0"
+version = "1.1.6"
 description = "NVDA add-on that announces incoming Discord chat messages automatically via UIA polling."
 readme = "README.md"
-requires-python = ">=3.13"
+requires-python = ">=3.14,<3.15"
 dependencies = []
 
 [dependency-groups]
@@ -16,6 +16,7 @@ dev = [
     "mypy>=1.20.0",
     "bandit>=1.9.0",
     "pip-audit>=2.10.0",
+    "pre-commit>=4.0.0",
 ]
 
 [tool.pytest.ini_options]
@@ -34,7 +35,7 @@ show_missing = true
 # Addon files use tabs (NVDA convention); test files use spaces (PEP 8).
 # Ruff's formatter is not run on appModules/ — tabs must be preserved.
 line-length = 120
-target-version = "py313"
+target-version = "py314"
 
 [tool.ruff.lint]
 select = [
@@ -68,7 +69,7 @@ quote-style = "double"
 indent-style = "space"
 
 [tool.mypy]
-python_version = "3.13"
+python_version = "3.14"
 platform = "linux"               # match CI; keeps windll/WINFUNCTYPE ignores from being "unused" on Windows
 files = ["appModules/discord"]
 strict = false

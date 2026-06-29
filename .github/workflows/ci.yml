@@ -27,7 +27,7 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v6
         with:
-          python-version-file: pyproject.toml
+          python-version: "3.14"
 
       - name: Install dependencies
         run: uv sync --all-extras
@@ -55,7 +55,7 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v6
         with:
-          python-version-file: pyproject.toml
+          python-version: "3.14"
 
       - name: Install dependencies
         run: uv sync --all-extras
@@ -65,12 +65,12 @@ jobs:
 
       - name: pip-audit — dependency CVE scan
         # CVE-2026-3219 / CVE-2026-6357 affect the `pip` CLI itself, not
-        # this project's runtime deps.  Ignored until upstream ships a fix
-        # available via uv.
-        run: uv run pip-audit --ignore-vuln CVE-2026-3219 --ignore-vuln CVE-2026-6357
+        # this project's runtime deps.  PYSEC-2026-196 is the same class of
+        # toolchain-only finding in the ephemeral uv environment.
+        run: uv run pip-audit --ignore-vuln CVE-2026-3219 --ignore-vuln CVE-2026-6357 --ignore-vuln PYSEC-2026-196
 
   test:
-    name: pytest (Python 3.13)
+    name: pytest (Python 3.14)
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v6
@@ -83,7 +83,7 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v6
         with:
-          python-version-file: pyproject.toml
+          python-version: "3.14"
 
       - name: Install dependencies
         run: uv sync --all-extras
