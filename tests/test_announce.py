@@ -1,126 +1,195 @@
-"""Unit tests for _scheduleAnnounce (dedup) and _doAnnounce (formatting).
-
-Covers:
-- Identical text is not announced twice (indefinite content dedup)
-- Different text IS announced
-- IAccessible "username , body , time" formatted as "username: body"
-- Multi-comma body preserved
-- Plain-text passed through unchanged
-- speech.speak called with the right arguments
-"""
+"""Snapshot baselines and accessible announcement tests."""
 
 import sys
-from unittest.mock import MagicMock
 
-# ---------------------------------------------------------------------------
-# Deduplication — _scheduleAnnounce
-# ---------------------------------------------------------------------------
+from discord import ChannelSnapshot, MessageEntry
 
 
-class TestScheduleAnnounce:
-    def test_first_call_announces(self, app_module):
-        spy = MagicMock()
-        app_module._doAnnounce = spy
-        app_module._scheduleAnnounce("hello world")
-        spy.assert_called_once_with("hello world")
-
-    def test_duplicate_is_suppressed(self, app_module):
-        spy = MagicMock()
-        app_module._doAnnounce = spy
-        app_module._scheduleAnnounce("hello world")
-        app_module._scheduleAnnounce("hello world")
-        assert spy.call_count == 1
-
-    def test_different_text_is_announced(self, app_module):
-        spy = MagicMock()
-        app_module._doAnnounce = spy
-        app_module._scheduleAnnounce("first message")
-        app_module._scheduleAnnounce("second message")
-        assert spy.call_count == 2
-
-    def test_dedup_is_indefinite(self, app_module):
-        """Same text must be suppressed even after a long gap (no time window)."""
-        spy = MagicMock()
-        app_module._doAnnounce = spy
-        app_module._scheduleAnnounce("repeated text , 9:00 AM")
-        app_module._scheduleAnnounce("repeated text , 9:00 AM")
-        app_module._scheduleAnnounce("repeated text , 9:00 AM")
-        assert spy.call_count == 1
-
-    def test_last_text_updated(self, app_module):
-        app_module._doAnnounce = MagicMock()
-        app_module._scheduleAnnounce("msg one")
-        assert app_module._lastText == "msg one"
-        app_module._scheduleAnnounce("msg two")
-        assert app_module._lastText == "msg two"
-
-    def test_disabled_does_not_update_last_text(self, app_module):
-        """`_lastText` must NOT be updated while disabled — so re-enabling
-        announces the message the user missed rather than suppressing it."""
-        app_module._announceEnabled = False
-        app_module._doAnnounce = MagicMock()
-        original_last = app_module._lastText
-        app_module._scheduleAnnounce("a new message while disabled")
-        assert app_module._lastText == original_last
-
-    def test_message_announced_after_re_enable(self, app_module):
-        """A message received while disabled must be announced once re-enabled."""
-        spy = MagicMock()
-        app_module._doAnnounce = spy
-        # Disable and receive a message — must NOT announce and must NOT update lastText
-        app_module._announceEnabled = False
-        app_module._scheduleAnnounce("hello from someone")
-        spy.assert_not_called()
-        assert app_module._lastText != "hello from someone"
-        # Re-enable — same message arrives again via poll
-        app_module._announceEnabled = True
-        app_module._scheduleAnnounce("hello from someone")
-        spy.assert_called_once_with("hello from someone")
+def snapshot(channel="channel-1", *items):
+    return ChannelSnapshot(
+        channel_id=channel,
+        messages=tuple(MessageEntry(("runtime", identity), text) for identity, text in items),
+    )
 
 
-# ---------------------------------------------------------------------------
-# Formatting — _doAnnounce
-# ---------------------------------------------------------------------------
+def ui_message():
+    return sys.modules["ui"].message
 
 
-class TestDoAnnounce:
-    def _speak_arg(self, app_module, text):
-        """Call _doAnnounce and return the string passed to speech.speak."""
-        speech = sys.modules["speech"]
-        speech.speak.reset_mock()
-        app_module._doAnnounce(text)
-        assert speech.speak.called
-        spoken_list = speech.speak.call_args[0][0]
-        return spoken_list[0]
+class TestSnapshotDiffing:
+    def test_first_read_establishes_silent_baseline(self, app_module):
+        app_module._processSnapshot(snapshot("one", (1, "alice: existing")))
 
-    def test_iaccess_format_three_parts(self, app_module):
-        result = self._speak_arg(app_module, "alice , hello there , 9:04 AM")
-        assert result == "alice: hello there"
+        ui_message().assert_not_called()
 
-    def test_iaccess_format_body_with_comma(self, app_module):
-        result = self._speak_arg(app_module, "alice , yes , no , 9:04 AM")
-        assert result == "alice: yes , no"
+    def test_new_runtime_id_is_announced_after_baseline(self, app_module):
+        app_module._processSnapshot(snapshot("one", (1, "alice: first")))
+        app_module._processSnapshot(snapshot("one", (1, "alice: first"), (2, "bob: second")))
 
-    def test_iaccess_format_two_parts_returns_username(self, app_module):
-        # Degenerate case: two-part string slips through (body was filtered but
-        # caller passed it anyway). We return just the first part gracefully.
-        result = self._speak_arg(app_module, "alice , 9:04 AM")
-        assert result == "alice"
+        ui_message().assert_called_once_with("bob: second")
 
-    def test_plain_text_passed_unchanged(self, app_module):
-        result = self._speak_arg(app_module, "hello from a friend")
-        assert result == "hello from a friend"
+    def test_channel_change_establishes_silent_baseline(self, app_module):
+        app_module._processSnapshot(snapshot("one", (1, "alice: first")))
+        app_module._processSnapshot(snapshot("two", (2, "bob: existing")))
 
-    def test_speech_speak_called_with_list(self, app_module):
-        speech = sys.modules["speech"]
-        speech.speak.reset_mock()
-        app_module._doAnnounce("test message")
-        args, _kwargs = speech.speak.call_args
-        assert isinstance(args[0], list)
+        ui_message().assert_not_called()
 
-    def test_speech_priority_is_now(self, app_module):
-        speech = sys.modules["speech"]
-        speech.speak.reset_mock()
-        app_module._doAnnounce("test")
-        _, kwargs = speech.speak.call_args
-        assert kwargs.get("priority") == speech.Spri.NOW
+    def test_edit_and_delete_do_not_announce_existing_runtime_ids(self, app_module):
+        app_module._processSnapshot(snapshot("one", (1, "alice: first"), (2, "bob: second")))
+        app_module._processSnapshot(snapshot("one", (1, "alice: edited")))
+
+        ui_message().assert_not_called()
+
+    def test_repeated_identical_messages_with_distinct_ids_are_announced(self, app_module):
+        app_module._processSnapshot(snapshot("one", (1, "alice: same")))
+        app_module._processSnapshot(snapshot("one", (1, "alice: same"), (2, "alice: same")))
+
+        ui_message().assert_called_once_with("alice: same")
+
+    def test_fallback_identity_window_slide_does_not_reannounce_identical_messages(self, app_module):
+        raw_entries = [(None, "alice: same")] * app_module.MAX_SNAPSHOT_MESSAGES
+        first = ChannelSnapshot("one", app_module._identifyMessages(raw_entries))
+        second_entries = [*raw_entries[1:], (None, "alice: same")]
+        second = ChannelSnapshot("one", app_module._identifyMessages(second_entries))
+
+        app_module._processSnapshot(first)
+        app_module._processSnapshot(second)
+
+        ui_message().assert_not_called()
+
+    def test_ordered_burst_is_coalesced_into_one_message(self, app_module):
+        app_module._processSnapshot(snapshot("one", (1, "existing")))
+        app_module._processSnapshot(snapshot("one", (1, "existing"), (2, "first"), (3, "second"), (4, "third")))
+
+        ui_message().assert_called_once_with("first\nsecond\nthird")
+
+    def test_history_prepended_before_known_tail_is_not_announced(self, app_module):
+        app_module._processSnapshot(snapshot("one", (2, "existing"), (3, "tail")))
+        app_module._processSnapshot(snapshot("one", (1, "older history"), (2, "existing"), (3, "tail")))
+
+        ui_message().assert_not_called()
+
+    def test_zero_overlap_recovers_with_silent_baseline(self, app_module):
+        app_module._processSnapshot(snapshot("one", (1, "first"), (2, "old tail")))
+        app_module._processSnapshot(snapshot("one", (3, "replacement"), (4, "new tail")))
+        ui_message().assert_not_called()
+
+        app_module._processSnapshot(snapshot("one", (3, "replacement"), (4, "new tail"), (5, "later")))
+
+        ui_message().assert_called_once_with("later")
+
+    def test_repeated_empty_snapshots_are_stable_without_recovery_log(self, app_module):
+        empty = snapshot("one")
+        app_module._processSnapshot(empty)
+        log = sys.modules["logHandler"].log
+        log.debug.reset_mock()
+
+        app_module._processSnapshot(empty)
+
+        ui_message().assert_not_called()
+        log.debug.assert_not_called()
+
+    def test_unchanged_nonempty_snapshot_does_not_log_every_poll(self, app_module):
+        unchanged = snapshot("one", (1, "existing"))
+        app_module._processSnapshot(unchanged)
+        log = sys.modules["logHandler"].log
+        log.debug.reset_mock()
+
+        app_module._processSnapshot(unchanged)
+
+        ui_message().assert_not_called()
+        log.debug.assert_not_called()
+
+    def test_fallback_overlap_announces_only_suffix_after_known_tail(self, app_module):
+        first = ChannelSnapshot("one", app_module._identifyMessages([(None, "existing"), (None, "tail")]))
+        second = ChannelSnapshot(
+            "one",
+            app_module._identifyMessages(
+                [(None, "older history"), (None, "existing"), (None, "tail"), (None, "new suffix")]
+            ),
+        )
+
+        app_module._processSnapshot(first)
+        app_module._processSnapshot(second)
+
+        ui_message().assert_called_once_with("new suffix")
+
+    def test_ambiguous_duplicate_window_recovers_silently_until_overlap_returns(self, app_module):
+        duplicates = [(None, "same")] * app_module.MAX_SNAPSHOT_MESSAGES
+        first = ChannelSnapshot("one", app_module._identifyMessages(duplicates))
+        indistinguishable_replacement = ChannelSnapshot("one", app_module._identifyMessages(duplicates))
+        changed_window_entries = [*duplicates[1:], (None, "new tail")]
+        changed_window = ChannelSnapshot("one", app_module._identifyMessages(changed_window_entries))
+        later_entries = [*changed_window_entries, (None, "later")]
+        later = ChannelSnapshot("one", app_module._identifyMessages(later_entries))
+
+        app_module._processSnapshot(first)
+        app_module._processSnapshot(indistinguishable_replacement)
+        app_module._processSnapshot(changed_window)
+        ui_message().assert_not_called()
+
+        app_module._processSnapshot(later)
+
+        ui_message().assert_called_once_with("later")
+
+    def test_unknown_snapshot_forces_next_successful_read_to_baseline(self, app_module):
+        app_module._processSnapshot(snapshot("one", (1, "existing")))
+        app_module._markBaselineRequired()
+        app_module._processSnapshot(snapshot("one", (1, "existing"), (2, "arrived while unavailable")))
+
+        ui_message().assert_not_called()
+
+    def test_per_channel_snapshot_cache_is_bounded(self, app_module):
+        for index in range(app_module.MAX_CHANNEL_SNAPSHOTS + 1):
+            app_module._processSnapshot(snapshot(f"channel-{index}", (index, "existing")))
+
+        assert len(app_module._channelSnapshots) == app_module.MAX_CHANNEL_SNAPSHOTS
+        assert "channel-0" not in app_module._channelSnapshots
+
+
+class TestAccessiblePresentation:
+    def test_uses_ui_message_for_speech_and_braille(self, app_module):
+        app_module._presentMessages((MessageEntry(("runtime", 1), "hello"),))
+
+        ui_message().assert_called_once_with("hello")
+
+    def test_burst_count_is_bounded_with_explicit_overflow(self, app_module):
+        entries = tuple(
+            MessageEntry(("runtime", index), f"message {index}") for index in range(app_module.MAX_BURST_MESSAGES + 3)
+        )
+
+        app_module._presentMessages(entries)
+
+        output = ui_message().call_args.args[0]
+        assert "message 0" in output
+        assert f"{3} more messages" in output
+        assert len(output) <= app_module.MAX_ANNOUNCEMENT_CHARS
+
+    def test_single_hidden_message_uses_singular_overflow(self, app_module):
+        entries = tuple(
+            MessageEntry(("runtime", index), f"message {index}") for index in range(app_module.MAX_BURST_MESSAGES + 1)
+        )
+
+        app_module._presentMessages(entries)
+
+        assert ui_message().call_args.args[0].endswith("1 more message")
+
+    def test_single_long_message_is_bounded(self, app_module):
+        app_module._presentMessages((MessageEntry(("runtime", 1), "x" * 5000),))
+
+        output = ui_message().call_args.args[0]
+        assert output.endswith("…")
+        assert len(output) <= app_module.MAX_MESSAGE_CHARS
+
+    def test_user_interface_failure_does_not_escape(self, app_module):
+        ui_message().side_effect = RuntimeError("output failed")
+
+        app_module._presentMessages((MessageEntry(("runtime", 1), "hello"),))
+
+    def test_logs_never_include_message_content(self, app_module):
+        secret = "private secret body"
+        app_module._processSnapshot(snapshot("one", (1, "existing")))
+        app_module._processSnapshot(snapshot("one", (1, "existing"), (2, secret)))
+
+        log = sys.modules["logHandler"].log
+        assert secret not in str(log.method_calls)

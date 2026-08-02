@@ -8,6 +8,38 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
+## [2.0.0] - 2026-08-02
+
+### Added
+
+- Discord PTB and Canary now load through package-relative imports, with regression coverage for NVDA's package loading behavior.
+- Offline add-on help documents setup, gestures, privacy behavior, and known limitations.
+- Release artifacts now include CycloneDX and SPDX SBOMs, checksums, and Sigstore signatures.
+- Renovate configuration covers Python development dependencies, the uv lockfile, pre-commit hooks, and pinned GitHub Actions.
+
+### Changed
+
+- NVDA 2026.1 is now both the minimum supported and last-tested API release, with live testing on NVDA 2026.1.1. Development and CI use Python 3.13.12, matching NVDA 2026.1.
+- Message detection now uses bounded structural UIA snapshots keyed by Discord channel and message identity. Startup, channel changes, foreground returns, re-enabling announcements, and recovery from read failures establish silent baselines.
+- Announcements use NVDA's standard message API, so output reaches speech and braille at normal priority.
+- The announcement toggle is now `NVDA+Alt+Shift+D`, avoiding the global gesture used by the Application Dictionary add-on.
+- Packaging is deterministic and rejects missing files, unsafe paths, symlinks, junctions, and partial writes.
+- CI and release workflows use locked dependencies and immutable GitHub Actions revisions. Tag releases must come from `main`, pass tests and security checks, and reproduce the same add-on archive twice.
+
+### Fixed
+
+- Automatic announcements no longer depend on unreliable WinEvent callbacks or broad NVDA event suppression.
+- Message text is stripped of control and bidirectional-formatting characters, normalized, and length-limited before presentation.
+- Diagnostic logging no longer records Discord message bodies.
+- AppModule shutdown is idempotent and cancels its poll timer once.
+
+### Removed
+
+- Support declarations for NVDA versions older than 2026.1.
+- The duplicate `requirements-dev.txt`; `pyproject.toml` and `uv.lock` are now the only development dependency definitions.
+
+---
+
 ## [1.1.6] - 2026-04-11
 
 ### Added

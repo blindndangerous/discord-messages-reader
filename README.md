@@ -7,13 +7,15 @@ An NVDA add-on that automatically announces incoming Discord chat messages as th
 
 ## How It Works
 
-Discord is built on Chromium/Electron. NVDA's standard accessibility hooks become unreliable for the message list when focus is in the chat input field. This add-on bypasses that limitation by reading Discord's UI Automation (UIA) tree directly, polling every 500 milliseconds for new messages. When a new message appears, it is spoken immediately at the highest speech priority so it is never missed.
+Discord is built on Chromium/Electron. NVDA's standard accessibility hooks can become unreliable for the message list when focus is in the chat input field. This add-on reads Discord's UI Automation (UIA) tree every 500 milliseconds. It tracks structurally identified message nodes per channel, announces newly added entries in order, and establishes a silent baseline when Discord starts, changes channel, returns to the foreground, or is unmuted.
+
+Announcements use NVDA's standard message API, so they are presented through both speech and braille without forcing highest-priority speech.
 
 ## Requirements
 
-- NVDA 2024.1 or later
+- NVDA 2026.1 (tested with NVDA 2026.1.1)
 - Discord (stable, PTB, or Canary builds)
-- Windows 10 or later
+- A Windows version supported by NVDA 2026.1
 
 ## Installation
 
@@ -22,6 +24,8 @@ Discord is built on Chromium/Electron. NVDA's standard accessibility hooks becom
 3. Restart NVDA when prompted.
 4. Open Discord. The add-on activates automatically.
 
+See [SECURITY.md](SECURITY.md) for signature and checksum verification steps.
+
 ## Usage
 
 No configuration is required. Once installed:
@@ -29,11 +33,11 @@ No configuration is required. Once installed:
 - Open a Discord channel or direct message conversation.
 - Incoming messages are announced automatically as they arrive.
 - Announcements only happen when Discord is the active (foreground) window.
-- Typing indicators and status changes are filtered out silently.
+- Discord controls that are not structurally exposed as messages are ignored.
 
 ### Keyboard Shortcuts
 
-- `NVDA+Ctrl+Shift+D`: Toggle automatic announcements on or off.
+- `NVDA+Alt+Shift+D`: Toggle automatic announcements on or off.
 - `Alt+1`: Read the most recent message.
 - `Alt+2` through `Alt+9`: Read the 2nd through 9th most recent message.
 - `Alt+0`: Read the 10th most recent message.
@@ -43,8 +47,9 @@ All gestures appear under **Discord Messages Reader** in NVDA's Input Gestures d
 ## Known Limitations
 
 - Messages are announced up to 500 milliseconds after they appear in Discord's UI, which is the polling interval.
-- The add-on reads the most recently visible message. If several messages arrive in rapid succession during a polling gap, only the last one is announced.
-- Automatic announcements only occur when Discord is the foreground application. Use `Alt+1` through `Alt+0` to catch up on messages received while Discord was in the background.
+- Only messages currently exposed in Discord's UIA tree can be detected. Messages virtualized out of the visible accessibility tree are unavailable to the add-on.
+- Automatic announcements only occur while Discord is the foreground application. Returning to Discord establishes a silent baseline so older messages are not mistaken for new arrivals. Use `Alt+1` through `Alt+0` to review currently exposed messages.
+- Discord UI updates can change its accessibility structure. Please report regressions with the Discord and NVDA versions, but redact private content from logs before attaching them.
 
 ## Supported Discord Builds
 
@@ -54,12 +59,12 @@ All gestures appear under **Discord Messages Reader** in NVDA's Input Gestures d
 
 ## Building From Source
 
-Requires Python 3.14 and uv.
+Requires Python 3.13.12, matching NVDA 2026.1, and uv.
 
 ```
 git clone https://github.com/blindndangerous/discord-messages-reader.git
 cd discord-messages-reader
-uv sync --all-extras
+uv sync --locked
 uv run python build.py
 ```
 
@@ -68,7 +73,7 @@ The distributable add-on file is written to `dist/`.
 ### Running Tests
 
 ```
-uv sync --all-extras
+uv sync --locked
 uv run pytest
 ```
 

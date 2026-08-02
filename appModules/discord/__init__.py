@@ -1,421 +1,502 @@
-"""NVDA AppModule for Discord — announces incoming chat messages.
+"""NVDA AppModule announcing new Discord messages from structural UIA snapshots."""
 
-Primary mechanism: periodic UIA polling of the message list.
-Discord is a Chromium/Electron app. NVDA's browse mode (virtual buffer) reads
-messages via UIA. IAccessible WinEvent hooks are unreliable because Chrome's
-renderer stops publishing IAccessible events when the message list is not active.
-UIA, however, always exposes the full message list regardless of focus.
-
-We poll the UIA tree every 500 ms. When the last message in the list differs
-from the last announced message, we announce it via NVDA speech.
-
-The WinEvent hook is kept as a fast-path trigger: when it fires (e.g. from
-the message list being active), it triggers an immediate UIA read instead of
-waiting for the next poll cycle.
-"""
 from __future__ import annotations
 
 import contextlib
-import ctypes
-import ctypes.wintypes
-import re
-import time
+import hashlib
+import unicodedata
+from dataclasses import dataclass
 from typing import Any
+from urllib.parse import urlsplit
 
 import appModuleHandler
 import core
-import speech
+import ui
 import UIAHandler
 from logHandler import log
 
-EVENT_OBJECT_NAMECHANGE = 0x800C
-WINEVENT_OUTOFCONTEXT   = 0x0000
-
-_WinEventProcType = ctypes.WINFUNCTYPE(  # type: ignore[attr-defined]
-	None,
-	ctypes.wintypes.HANDLE,
-	ctypes.wintypes.DWORD,
-	ctypes.wintypes.HWND,
-	ctypes.wintypes.LONG,
-	ctypes.wintypes.LONG,
-	ctypes.wintypes.DWORD,
-	ctypes.wintypes.DWORD,
-)
-
-_STATUS_SUFFIXES = (', Online', ', Offline', ', Idle', ', Do Not Disturb', ', Streaming')
-_STATUS_SUFFIXES_LOWER = tuple(s.lower() for s in _STATUS_SUFFIXES)
-_NOISE_LABELS_LOWER = frozenset({"new"})
-
-# UIA property/type constants (from UIAutomationClient.h)
-_UIA_NamePropertyId        = 30005
+# UI Automation constants from UIAutomationClient.h.
 _UIA_ControlTypePropertyId = 30003
-_UIA_ListControlTypeId     = 50008
+_UIA_NamePropertyId = 30005
+_UIA_ValueValuePropertyId = 30045
+_UIA_AriaRolePropertyId = 30101
+_UIA_DocumentControlTypeId = 50030
+_UIA_ListControlTypeId = 50008
+_UIA_ListItemControlTypeId = 50007
 _UIA_TreeScope_Descendants = 4
 
-# How often to poll the UIA tree for new messages (milliseconds)
 _POLL_INTERVAL_MS = 500
 
-# Pre-compiled: matches standalone timestamp strings like "9:04 AM" or "9:04"
-_TIMESTAMP_RE = re.compile(r'^\d{1,2}:\d{2}\s*(AM|PM)?$', re.IGNORECASE)
+
+MessageIdentity = tuple[str | int, ...]
+
+
+@dataclass(frozen=True)
+class MessageEntry:
+	"""One visible Discord message and its stable identity."""
+
+	identity: MessageIdentity
+	text: str
+
+
+@dataclass(frozen=True)
+class ChannelSnapshot:
+	"""Bounded ordered view of messages in one Discord channel."""
+
+	channel_id: str
+	messages: tuple[MessageEntry, ...]
 
 
 class AppModule(appModuleHandler.AppModule):
-	disableBrowseModeByDefault = True
+	"""Poll Discord's active channel and present new messages once."""
+
 	scriptCategory = "Discord Messages Reader"
 
-	_lastText: str = ""
-	_announceEnabled: bool = True
-	_lastHookTime: float = 0.0   # time of last IAccessible nameChange — for valueChange suppression
-	_lastUiaRead: float = 0.0    # time of last completed UIA read — for WinEvent debounce
-	_discordHwnd: int = 0        # hwnd learned from first WinEvent; used for UIA root lookup
-	_pollTimer = None
-	_terminated: bool = False
+	MAX_SNAPSHOT_MESSAGES = 100
+	MAX_CHANNEL_SNAPSHOTS = 8
+	MAX_BURST_MESSAGES = 10
+	MAX_MESSAGE_CHARS = 500
+	MAX_ANNOUNCEMENT_CHARS = 1000
 
 	def __init__(self, *args: Any, **kwargs: Any) -> None:
 		super().__init__(*args, **kwargs)
+		self._announceEnabled = True
+		self._terminated = False
+		self._pollTimer: Any = None
+		self._channelSnapshots: dict[str, ChannelSnapshot] = {}
+		self._currentChannelId: str | None = None
+		self._uiaClient: Any = None
+		self._channelRoot: Any = None
+		self._channelDocument: Any = None
+		self._messageList: Any = None
+		self._channelDocumentWindowHandle: Any = None
+		self._needsBaseline = True
 		log.info(f"DiscordMessages: loaded (PID {self.processID})")
-
-		# IAccessible WinEvent hook — fast-path trigger when IAccessible is active.
-		# Must hold a reference to _hookProc or the GC will free the ctypes callback.
-		self._hookProc = _WinEventProcType(self._winEventCallback)
-		self._hook = ctypes.windll.user32.SetWinEventHook(  # type: ignore[attr-defined]
-			EVENT_OBJECT_NAMECHANGE,
-			EVENT_OBJECT_NAMECHANGE,
-			None,
-			self._hookProc,
-			self.processID,
-			0,
-			WINEVENT_OUTOFCONTEXT,
-		)
-		if self._hook:
-			log.info("DiscordMessages: WinEvent hook registered")
-		else:
-			log.warning("DiscordMessages: WinEvent hook FAILED")
-
-		# Start UIA polling — primary mechanism
 		self._schedulePoll()
 
 	def terminate(self) -> None:
+		if self._terminated:
+			return
 		self._terminated = True
 		if self._pollTimer is not None:
 			with contextlib.suppress(Exception):
 				self._pollTimer.Stop()
 			self._pollTimer = None
-		if getattr(self, '_hook', None):
-			ctypes.windll.user32.UnhookWinEvent(self._hook)  # type: ignore[attr-defined]
-			self._hook = None
 		super().terminate()
 
-	# ------------------------------------------------------------------ #
-	# IAccessible WinEvent hook — fast-path trigger                       #
-	# ------------------------------------------------------------------ #
-
-	def _winEventCallback(self, hHook: Any, event: Any, hwnd: Any, idObject: Any, idChild: Any, thread: Any, time_ms: Any) -> None:
-		try:
-			# Only store a non-zero hwnd; zero is not a valid window handle.
-			if not self._discordHwnd and hwnd:
-				self._discordHwnd = hwnd
-			self._lastHookTime = time.time()
-			# Debounce: skip if a UIA read ran within the last poll interval.
-			# This prevents stacking up tree walks during rapid navigation.
-			if time.time() - self._lastUiaRead < _POLL_INTERVAL_MS / 1000.0:
-				return
-			core.callLater(0, self._uiaRead)
-		except Exception as e:
-			log.warning(f"DiscordMessages: winEventCallback error: {e}")
-
-	# ------------------------------------------------------------------ #
-	# UIA polling — primary message detection                             #
-	# ------------------------------------------------------------------ #
-
 	def _schedulePoll(self) -> None:
-		"""Schedule the next UIA poll.
-
-		core.callLater is thread-safe — it posts to the main thread internally,
-		so this is safe to call from any thread (including the Dummy-N worker
-		thread NVDA uses when Discord launches while NVDA is already running).
-		"""
+		"""Schedule one poll on NVDA's core queue."""
 		if not self._terminated:
 			self._pollTimer = core.callLater(_POLL_INTERVAL_MS, self._pollTick)
 
 	def _pollTick(self) -> None:
 		self._pollTimer = None
-		if not self._terminated:
-			self._uiaRead()
-			self._schedulePoll()
-
-	def _uiaRead(self) -> None:
-		"""Read the latest message from Discord's UIA tree; announce if new."""
 		if self._terminated:
 			return
-		if not self._announceEnabled:
+		self._uiaRead()
+		self._schedulePoll()
+
+	def _uiaRead(self) -> None:
+		"""Read and process one foreground structural snapshot."""
+		if self._terminated:
 			return
 		import api
+
 		try:
-			fg = api.getForegroundObject()
-			if not fg or fg.appModule is not self:
-				return
+			foreground = api.getForegroundObject()
+			is_foreground = bool(foreground and foreground.appModule is self)
 		except Exception:
+			is_foreground = False
+			foreground = None
+		if not is_foreground or not self._announceEnabled:
+			self._markBaselineRequired()
 			return
+
+		snapshot = self._getSnapshotViaUIA(foreground)
+		if snapshot is None:
+			self._markBaselineRequired()
+			return
+		self._processSnapshot(snapshot)
+
+	def _getSnapshotViaUIA(self, foreground: Any) -> ChannelSnapshot | None:
+		"""Return active channel URL and ordered list items below its main landmark."""
 		try:
-			name = self._getLatestMessageViaUIA()
-			self._lastUiaRead = time.time()
-			if name:
-				log.debug(f"DiscordMessages: UIA read: {name[:120]!r}")
-				self._filterAndAnnounce(name)
+			uia = UIAHandler.handler.clientObject
+			if not uia:
+				self._uiaClient = None
+				self._invalidateChannelDocument()
+				return None
+			window_handle = foreground.windowHandle
+			if uia is not self._uiaClient:
+				self._uiaClient = uia
+				self._invalidateChannelDocument()
+			if (
+				self._channelRoot is not None
+				and window_handle != self._channelDocumentWindowHandle
+			):
+				self._invalidateChannelDocument()
+
+			document, channel_id = self._getCachedChannelDocument()
+			root = self._channelRoot
+			if document is None or root is None:
+				root = uia.ElementFromHandle(window_handle)
+				if not root:
+					return None
+				document_condition = uia.CreatePropertyCondition(
+					_UIA_ControlTypePropertyId,
+					_UIA_DocumentControlTypeId,
+				)
+				documents = root.FindAll(_UIA_TreeScope_Descendants, document_condition)
+				if not documents:
+					return None
+				document, channel_id = self._findChannelDocument(documents)
+				self._channelRoot = root if document is not None else None
+				self._channelDocument = document
+				self._channelDocumentWindowHandle = window_handle if document is not None else None
+			if document is None or channel_id is None:
+				return None
+
+			message_list = self._getMessageList(uia, root)
+			if message_list is None:
+				return None
+			raw_entries = self._readMessageEntries(uia.RawViewWalker, message_list)
+			return ChannelSnapshot(channel_id, self._identifyMessages(raw_entries))
 		except Exception as e:
-			log.warning(f"DiscordMessages: uiaRead error: {e}")
-
-	_cachedMsgList = None
-	_cachedMsgListName = None
-
-	def _getMsgListViaUIA(self, uia: Any) -> Any:
-		"""Find and cache the Discord message list UIA element.
-
-		On a cache hit the expensive FindAll tree walk is skipped entirely.
-		The cache is invalidated when the element's name changes (channel
-		switch) or when accessing it raises a COM exception (element detached).
-		"""
-		if self._cachedMsgList:
-			cache_valid = False
-			with contextlib.suppress(Exception):
-				n = self._cachedMsgList.GetCurrentPropertyValue(_UIA_NamePropertyId) or ""
-				cache_valid = bool(n and n == self._cachedMsgListName)
-			if cache_valid:
-				return self._cachedMsgList
-			self._cachedMsgList = None
-			self._cachedMsgListName = None
-
-		hwnd = self._discordHwnd
-		if not hwnd:
-			import api
-			fg = api.getForegroundObject()
-			if fg and fg.appModule is self:
-				hwnd = fg.windowHandle
-				self._discordHwnd = hwnd
-		if not hwnd:
+			self._invalidateChannelDocument()
+			log.warning(f"DiscordMessages: snapshot read failed ({type(e).__name__})")
 			return None
 
-		root = uia.ElementFromHandle(hwnd)
-		if not root:
-			return None
+	def _invalidateChannelDocument(self) -> None:
+		self._channelRoot = None
+		self._channelDocument = None
+		self._messageList = None
+		self._channelDocumentWindowHandle = None
+		self._markBaselineRequired()
 
-		# Find all List controls then pick the one named "Messages in …".
-		# Discord's sidebar also has a "Direct Messages" list — we skip it.
+	def _getCachedChannelDocument(self) -> tuple[Any | None, str | None]:
+		"""Return a live cached document, invalidating detached or non-channel nodes."""
+		if self._channelDocument is None:
+			return None, None
+		try:
+			value = self._channelDocument.GetCurrentPropertyValue(_UIA_ValueValuePropertyId)
+		except Exception:
+			self._invalidateChannelDocument()
+			return None, None
+		channel_id = self._channelIdentity(value)
+		if channel_id is not None:
+			return self._channelDocument, channel_id
+		self._invalidateChannelDocument()
+		return None, None
+
+	def _findChannelDocument(self, documents: Any) -> tuple[Any | None, str | None]:
+		for index in range(documents.Length):
+			document = documents.GetElement(index)
+			value = self._getElementProperty(document, _UIA_ValueValuePropertyId, "CurrentValue")
+			channel_id = self._channelIdentity(value)
+			if channel_id is not None:
+				return document, channel_id
+		return None, None
+
+	def _getMessageList(self, uia: Any, root: Any) -> Any | None:
+		"""Return Discord's message list using its locale-independent main landmark."""
+		if self._messageList is not None:
+			control_type = self._getElementProperty(
+				self._messageList,
+				_UIA_ControlTypePropertyId,
+				"CurrentControlType",
+			)
+			if control_type == _UIA_ListControlTypeId:
+				return self._messageList
+			self._messageList = None
+
 		condition = uia.CreatePropertyCondition(
-			_UIA_ControlTypePropertyId, _UIA_ListControlTypeId
+			_UIA_ControlTypePropertyId,
+			_UIA_ListControlTypeId,
 		)
 		lists = root.FindAll(_UIA_TreeScope_Descendants, condition)
-		if not lists or lists.Length == 0:
+		if not lists:
 			return None
-
-		for i in range(lists.Length):
-			elem = lists.GetElement(i)
-			n = elem.GetCurrentPropertyValue(_UIA_NamePropertyId) or ""
-			if "messages in" in n.lower():
-				self._cachedMsgList = elem
-				self._cachedMsgListName = n
-				return elem
+		walker = uia.RawViewWalker
+		for index in range(lists.Length):
+			candidate = lists.GetElement(index)
+			if self._hasAriaAncestor(walker, candidate, "main"):
+				self._messageList = candidate
+				return candidate
 		return None
 
-	def _getLatestMessageViaUIA(self) -> str | None:
-		"""Walk Discord's UIA tree and return the text of the latest message."""
-		try:
-			uia = UIAHandler.handler.clientObject
-			if not uia:
-				return None
-
-			msgList = self._getMsgListViaUIA(uia)
-			if not msgList:
-				return None
-
-			walker = uia.RawViewWalker
-			child = walker.GetLastChildElement(msgList)
-
-			# If the cached element is detached it will have no children — retry.
-			if not child and self._cachedMsgList is not None:
-				self._cachedMsgList = None
-				self._cachedMsgListName = None
-				msgList = self._getMsgListViaUIA(uia)
-				if not msgList:
-					return None
-				child = walker.GetLastChildElement(msgList)
-
-			# Walk backward from the last child; message containers often have
-			# an empty aggregate name — content lives in grandchildren.
-			for _ in range(10):
-				if not child:
-					break
-				name = child.GetCurrentPropertyValue(_UIA_NamePropertyId) or ""
-				if name and self._isValidMessage(name):
-					return name
-				grandchild = walker.GetLastChildElement(child)
-				while grandchild:
-					gname = grandchild.GetCurrentPropertyValue(_UIA_NamePropertyId) or ""
-					if gname and self._isValidMessage(gname):
-						return gname
-					grandchild = walker.GetPreviousSiblingElement(grandchild)
-				child = walker.GetPreviousSiblingElement(child)
-
-			return None
-
-		except Exception as e:
-			log.warning(f"DiscordMessages: getLatestMessage error: {e}")
-			return None
-
-	# ------------------------------------------------------------------ #
-	# Filtering and announcement                                          #
-	# ------------------------------------------------------------------ #
-
-	def _filterAndAnnounce(self, name: str) -> None:
-		lower = name.strip().lower()
-
-		if lower in _NOISE_LABELS_LOWER:
-			return
-		if any(lower.endswith(s) for s in _STATUS_SUFFIXES_LOWER):
-			return
-		if 'is typing' in lower or 'are typing' in lower:
-			return
-
-		if ' , ' in name:
-			# IAccessible format: "username , body , HH:MM AM"
-			parts = name.split(' , ')
-			if ':' not in parts[-1]:
-				return
-			body = ' , '.join(parts[1:-1]).strip() if len(parts) >= 3 else ""
-			if not body:
-				return
-			self._scheduleAnnounce(name)
-			return
-
-		# Plain-text UIA — skip timestamps and very short UI labels
-		if len(name) < 3 or _TIMESTAMP_RE.match(name.strip()):
-			return
-		self._scheduleAnnounce(name)
-
-	def _scheduleAnnounce(self, text: str) -> None:
-		if text == self._lastText:
-			return
-		if not self._announceEnabled:
-			return
-		self._lastText = text
-		log.debug(f"DiscordMessages: announcing {text[:80]!r}")
-		self._doAnnounce(text)
-
-	def _doAnnounce(self, text: str) -> None:
-		# IAccessible format → "username: body"
-		if ' , ' in text:
-			parts = text.split(' , ')
-			formatted = (
-				"{}: {}".format(parts[0], ' , '.join(parts[1:-1]))
-				if len(parts) >= 3
-				else parts[0]
-			)
-		else:
-			formatted = text
-		log.debug(f"DiscordMessages: SPEAKING {formatted[:120]!r}")
-		try:
-			speech.speak([formatted], priority=speech.Spri.NOW)
-		except Exception as e:
-			log.warning(f"DiscordMessages: speech error: {e}")
-
-	# ------------------------------------------------------------------ #
-	# History reading — Alt+1 through Alt+0                              #
-	# ------------------------------------------------------------------ #
-
-	def _isValidMessage(self, name: str) -> bool:
-		"""Return True if *name* looks like a real chat message."""
-		lower = name.strip().lower()
-		if lower in _NOISE_LABELS_LOWER:
-			return False
-		if any(lower.endswith(s) for s in _STATUS_SUFFIXES_LOWER):
-			return False
-		if 'is typing' in lower or 'are typing' in lower:
-			return False
-		if ' , ' in name:
-			parts = name.split(' , ')
-			if ':' not in parts[-1]:
+	def _hasAriaAncestor(
+		self,
+		walker: Any,
+		element: Any,
+		role: str,
+		*,
+		max_depth: int = 12,
+	) -> bool:
+		ancestor = walker.GetParentElement(element)
+		for _ in range(max_depth):
+			if not ancestor:
 				return False
-			body = ' , '.join(parts[1:-1]).strip() if len(parts) >= 3 else ""
-			return bool(body)
-		return len(name) >= 3 and not _TIMESTAMP_RE.match(name.strip())
+			ancestor_role = self._getElementProperty(
+				ancestor,
+				_UIA_AriaRolePropertyId,
+				"CurrentAriaRole",
+			)
+			if isinstance(ancestor_role, str) and ancestor_role.casefold() == role:
+				return True
+			ancestor = walker.GetParentElement(ancestor)
+		return False
 
-	def _getMessagesViaUIA(self, count: int = 10) -> list[str]:
-		"""Walk the UIA tree and return up to *count* recent messages (oldest first)."""
+	def _readMessageEntries(
+		self,
+		walker: Any,
+		message_list: Any,
+	) -> list[tuple[MessageIdentity | None, str]]:
+		"""Read recent message list items in document order with bounded walking."""
+		child = walker.GetLastChildElement(message_list)
+		reversed_entries: list[tuple[MessageIdentity | None, str]] = []
+		iterations = 0
+		while (
+			child
+			and iterations < self.MAX_SNAPSHOT_MESSAGES * 4
+			and len(reversed_entries) < self.MAX_SNAPSHOT_MESSAGES
+		):
+			iterations += 1
+			control_type = self._getElementProperty(
+				child,
+				_UIA_ControlTypePropertyId,
+				"CurrentControlType",
+			)
+			if control_type == _UIA_ListItemControlTypeId:
+				text = self._getElementProperty(child, _UIA_NamePropertyId, "CurrentName")
+				if not isinstance(text, str) or not text:
+					text = self._lastNamedChild(walker, child)
+				if text:
+					reversed_entries.append((self._runtimeIdentity(child), text))
+			child = walker.GetPreviousSiblingElement(child)
+		reversed_entries.reverse()
+		return reversed_entries
+
+	def _lastNamedChild(self, walker: Any, element: Any) -> str:
+		child = walker.GetLastChildElement(element)
+		for _ in range(20):
+			if not child:
+				break
+			text = self._getElementProperty(child, _UIA_NamePropertyId, "CurrentName")
+			if isinstance(text, str) and text:
+				return text
+			child = walker.GetPreviousSiblingElement(child)
+		return ""
+
+	@staticmethod
+	def _channelIdentity(value: Any) -> str | None:
+		if not isinstance(value, str):
+			return None
 		try:
-			uia = UIAHandler.handler.clientObject
-			if not uia:
-				return []
+			parsed = urlsplit(value)
+		except ValueError:
+			return None
+		host = parsed.netloc.lower()
+		if parsed.scheme.lower() != "https" or host not in {
+			"discord.com",
+			"ptb.discord.com",
+			"canary.discord.com",
+		}:
+			return None
+		path = parsed.path[:-1] if parsed.path.endswith("/") else parsed.path
+		path_parts = path.split("/")
+		if (
+			len(path_parts) != 4
+			or path_parts[:2] != ["", "channels"]
+			or (path_parts[2] != "@me" and not path_parts[2].isdigit())
+			or not path_parts[3].isdigit()
+		):
+			return None
+		return f"https://{host}/channels/{path_parts[2]}/{path_parts[3]}"
 
-			msgList = self._getMsgListViaUIA(uia)
-			if not msgList:
-				return []
+	@staticmethod
+	def _getElementProperty(element: Any, property_id: int, fallback_attribute: str) -> Any:
+		try:
+			return element.GetCurrentPropertyValue(property_id)
+		except Exception:
+			return getattr(element, fallback_attribute, "")
 
-			walker = uia.RawViewWalker
-			child = walker.GetLastChildElement(msgList)
+	@staticmethod
+	def _runtimeIdentity(element: Any) -> MessageIdentity | None:
+		try:
+			runtime_id = tuple(int(part) for part in element.GetRuntimeId())
+		except Exception:
+			return None
+		return ("runtime", *runtime_id) if runtime_id else None
 
-			# If the cached element is detached it will have no children — retry.
-			if not child and self._cachedMsgList is not None:
-				self._cachedMsgList = None
-				self._cachedMsgListName = None
-				msgList = self._getMsgListViaUIA(uia)
-				if not msgList:
-					return []
-				child = walker.GetLastChildElement(msgList)
+	def _identifyMessages(
+		self,
+		raw_entries: list[tuple[MessageIdentity | None, str]],
+	) -> tuple[MessageEntry, ...]:
+		"""Prefer UIA runtime IDs; use conservative occurrence IDs when unavailable.
 
-			candidates = []
-			# Over-collect to account for non-message items (date separators, etc.)
-			limit = count * 4
-			iterations = 0
-			while child and iterations < limit:
-				iterations += 1
-				name = child.GetCurrentPropertyValue(_UIA_NamePropertyId) or ""
-				if name:
-					candidates.append(name)
-				else:
-					grandchild = walker.GetLastChildElement(child)
-					while grandchild:
-						gname = grandchild.GetCurrentPropertyValue(_UIA_NamePropertyId) or ""
-						if gname:
-							candidates.append(gname)
-							break
-						grandchild = walker.GetPreviousSiblingElement(grandchild)
-				child = walker.GetPreviousSiblingElement(child)
+		Exact duplicate replacements at the bounded-window edge are indistinguishable
+		without runtime IDs. Reusing their occurrence IDs avoids replaying old content.
+		"""
+		occurrences: dict[str, int] = {}
+		messages: list[MessageEntry] = []
+		for runtime_id, text in raw_entries:
+			text = self._sanitizeText(text)
+			if not text:
+				continue
+			if runtime_id is None:
+				digest = hashlib.sha256(text.encode("utf-8")).hexdigest()
+				occurrence = occurrences.get(digest, 0)
+				occurrences[digest] = occurrence + 1
+				identity: MessageIdentity = ("text", digest, occurrence)
+			else:
+				identity = runtime_id
+			messages.append(MessageEntry(identity, text))
+		return tuple(messages)
 
-			messages = [m for m in candidates if self._isValidMessage(m)]
-			messages = messages[:count]
-			messages.reverse()  # oldest first
-			return messages
+	def _markBaselineRequired(self) -> None:
+		self._needsBaseline = True
 
+	def _processSnapshot(self, snapshot: ChannelSnapshot) -> None:
+		"""Store snapshot and announce only ordered additions to active channel."""
+		previous = self._channelSnapshots.get(snapshot.channel_id)
+		is_baseline = self._needsBaseline or self._currentChannelId != snapshot.channel_id or previous is None
+		self._rememberSnapshot(snapshot)
+		self._currentChannelId = snapshot.channel_id
+		self._needsBaseline = False
+		if is_baseline or previous is None:
+			log.debug(
+				"DiscordMessages: baseline channel=%s messages=%d",
+				self._identityForLog(snapshot.channel_id),
+				len(snapshot.messages),
+			)
+			return
+
+		added = self._orderedAdditions(previous.messages, snapshot.messages)
+		if added is None:
+			log.debug(
+				"DiscordMessages: recovery baseline channel=%s messages=%d",
+				self._identityForLog(snapshot.channel_id),
+				len(snapshot.messages),
+			)
+			return
+		if not added:
+			return
+		log.debug(
+			"DiscordMessages: snapshot channel=%s messages=%d added=%d",
+			self._identityForLog(snapshot.channel_id),
+			len(snapshot.messages),
+			len(added),
+		)
+		self._presentMessages(added)
+
+	def _orderedAdditions(
+		self,
+		previous: tuple[MessageEntry, ...],
+		current: tuple[MessageEntry, ...],
+	) -> tuple[MessageEntry, ...] | None:
+		"""Return only the suffix after the previously known tail.
+
+		No known tail means ordering cannot be recovered safely, so the current
+		snapshot becomes a silent baseline. Exact fallback duplicates that cannot be
+		distinguished remain stable and silent until a known ordered suffix appears.
+		"""
+		if not previous and not current:
+			return ()
+		if not previous or not current:
+			return None
+
+		known_tail = previous[-1].identity
+		matching_indices = [
+			index for index, message in enumerate(current) if message.identity == known_tail
+		]
+		if len(matching_indices) != 1:
+			return None
+		return current[matching_indices[0] + 1 :]
+
+	def _rememberSnapshot(self, snapshot: ChannelSnapshot) -> None:
+		if snapshot.channel_id in self._channelSnapshots:
+			del self._channelSnapshots[snapshot.channel_id]
+		self._channelSnapshots[snapshot.channel_id] = snapshot
+		while len(self._channelSnapshots) > self.MAX_CHANNEL_SNAPSHOTS:
+			oldest_channel = next(iter(self._channelSnapshots))
+			del self._channelSnapshots[oldest_channel]
+
+	def _presentMessages(self, messages: tuple[MessageEntry, ...]) -> None:
+		texts = [self._sanitizeText(message.text) for message in messages]
+		texts = [text for text in texts if text]
+		if not texts:
+			return
+		included: list[str] = []
+		for text in texts[: self.MAX_BURST_MESSAGES]:
+			candidate = "\n".join((*included, text))
+			if len(candidate) > self.MAX_ANNOUNCEMENT_CHARS:
+				break
+			included.append(text)
+		if not included:
+			return
+
+		hidden = len(texts) - len(included)
+		output = "\n".join(included)
+		if hidden:
+			noun = "message" if hidden == 1 else "messages"
+			suffix = f"{hidden} more {noun}"
+			available = self.MAX_ANNOUNCEMENT_CHARS - len(suffix) - 1
+			output = f"{output[:available]}\n{suffix}"
+		self._messageUser(output)
+
+	@staticmethod
+	def _messageUser(text: str) -> None:
+		try:
+			ui.message(text)
 		except Exception as e:
-			log.warning(f"DiscordMessages: getMessages error: {e}")
-			return []
+			log.warning(f"DiscordMessages: user output failed ({type(e).__name__})")
+
+	def _sanitizeText(self, text: str) -> str:
+		filtered: list[str] = []
+		for character in text:
+			codepoint = ord(character)
+			is_bidi_formatting = (
+				character in {"\u061c", "\u200e", "\u200f"}
+				or 0x202A <= codepoint <= 0x202E
+				or 0x2066 <= codepoint <= 0x2069
+			)
+			if is_bidi_formatting:
+				continue
+			if unicodedata.category(character) == "Cc":
+				if character.isspace():
+					filtered.append(" ")
+				continue
+			filtered.append(character)
+		text = " ".join("".join(filtered).split())
+		if len(text) > self.MAX_MESSAGE_CHARS:
+			return text[: self.MAX_MESSAGE_CHARS - 1] + "…"
+		return text
+
+	@staticmethod
+	def _identityForLog(value: str) -> str:
+		return hashlib.sha256(value.encode("utf-8")).hexdigest()[:12]
 
 	def _readNthLastMessage(self, n: int) -> None:
-		"""Speak the Nth-last message (1 = most recent, 10 = oldest of last ten)."""
+		"""Present Nth-last structural message (1 = most recent)."""
 		import api
+
 		try:
-			fg = api.getForegroundObject()
-			if not fg or fg.appModule is not self:
+			foreground = api.getForegroundObject()
+			if not foreground or foreground.appModule is not self:
 				return
 		except Exception:
 			return
-		messages = self._getMessagesViaUIA(count=10)
-		if not messages:
-			try:
-				speech.speak(["No messages found"], priority=speech.Spri.NOW)
-			except Exception as e:
-				log.warning(f"DiscordMessages: speech error: {e}")
+		snapshot = self._getSnapshotViaUIA(foreground)
+		if snapshot is None or not snapshot.messages:
+			self._messageUser("No messages found")
 			return
-		# messages is oldest-first; n=1 → most recent → index -1
-		idx = len(messages) - n
-		if idx < 0:
-			try:
-				speech.speak([f"Message {n} not available"], priority=speech.Spri.NOW)
-			except Exception as e:
-				log.warning(f"DiscordMessages: speech error: {e}")
+		index = len(snapshot.messages) - n
+		if index < 0:
+			self._messageUser(f"Message {n} not available")
 			return
-		self._doAnnounce(messages[idx])
+		text = self._sanitizeText(snapshot.messages[index].text)
+		if text:
+			self._messageUser(text)
 
 	def script_readMessage1(self, gesture: Any) -> None:
 		"""Read the most recent message."""
@@ -458,17 +539,15 @@ class AppModule(appModuleHandler.AppModule):
 		self._readNthLastMessage(10)
 
 	def script_toggleAnnounce(self, gesture: Any) -> None:
-		"""Toggle automatic announcement of incoming messages on or off."""
+		"""Toggle automatic incoming message announcements."""
 		self._announceEnabled = not self._announceEnabled
+		self._markBaselineRequired()
 		state = "on" if self._announceEnabled else "off"
-		try:
-			speech.speak([f"Discord announcements {state}"], priority=speech.Spri.NOW)
-		except Exception as e:
-			log.warning(f"DiscordMessages: speech error: {e}")
+		self._messageUser(f"Discord announcements {state}")
 		log.info(f"DiscordMessages: announcements toggled {state}")
 
-	__gestures = {  # noqa: RUF012 — NVDA reads this as a class attr by convention
-		"kb:NVDA+ctrl+shift+d": "toggleAnnounce",
+	__gestures = {  # noqa: RUF012 - NVDA reads this class attribute by convention.
+		"kb:NVDA+alt+shift+d": "toggleAnnounce",
 		"kb:alt+1": "readMessage1",
 		"kb:alt+2": "readMessage2",
 		"kb:alt+3": "readMessage3",
@@ -480,51 +559,3 @@ class AppModule(appModuleHandler.AppModule):
 		"kb:alt+9": "readMessage9",
 		"kb:alt+0": "readMessage10",
 	}
-
-	# ------------------------------------------------------------------ #
-	# NVDA event handlers                                                 #
-	# ------------------------------------------------------------------ #
-
-	def event_valueChange(self, obj: Any, nextHandler: Any) -> None:
-		"""Suppress Discord's edit-field clearing from cancelling our announcement."""
-		if time.time() - self._lastHookTime < 2.0:
-			return
-		nextHandler()
-
-	def event_UIA_liveRegionChange(self, obj: Any, nextHandler: Any) -> None:
-		"""UIA live region — fires if Discord publishes UIA live updates."""
-		try:
-			name = obj.name or ""
-		except Exception:
-			name = ""
-		if name and name != "(empty message)":
-			lower = name.lower()
-			if 'is typing' not in lower and 'are typing' not in lower:
-				self._filterAndAnnounce(name)
-		nextHandler()
-
-	def event_liveRegionChange(self, obj: Any, nextHandler: Any) -> None:
-		"""IAccessible live region change — fallback."""
-		try:
-			name = obj.name or ""
-		except Exception:
-			name = ""
-		if name and name != "(empty message)":
-			lower = name.lower()
-			if 'is typing' not in lower and 'are typing' not in lower:
-				self._filterAndAnnounce(name)
-		nextHandler()
-
-	def event_alert(self, obj: Any, nextHandler: Any) -> None:
-		try:
-			text = obj.name or ""
-		except Exception:
-			text = ""
-		if not text:
-			try:
-				text = obj.value or ""
-			except Exception:
-				text = ""
-		if text:
-			self._filterAndAnnounce(text)
-		nextHandler()
