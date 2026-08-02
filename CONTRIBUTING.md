@@ -4,9 +4,9 @@ Use this setup for local development.
 
 ## Prerequisites
 
-- Python 3.14
+- Python 3.13.12
 - uv
-- NVDA (any recent version), only needed if you want to test the live add-on in Discord
+- NVDA 2026.1.1, only needed for live Discord testing
 - Git
 
 ## Setting up
@@ -14,7 +14,7 @@ Use this setup for local development.
 ```
 git clone https://github.com/blindndangerous/discord-messages-reader.git
 cd discord-messages-reader
-uv sync --all-extras
+uv sync --locked
 ```
 
 ## Running the tests
@@ -34,9 +34,9 @@ appModules/
   discordcanary/__init__.py - Re-exports AppModule for Discord Canary
 tests/
   conftest.py               - NVDA stub installation and app_module fixture
-  test_filter.py            - _filterAndAnnounce unit tests
-  test_announce.py          - _scheduleAnnounce / _doAnnounce unit tests
-  test_uia.py               - _getLatestMessageViaUIA mock tests
+  test_filter.py            - content normalization and safety tests
+  test_announce.py          - snapshot diff and announcement tests
+  test_uia.py               - structural UIA snapshot tests
   test_history.py           - Alt+1-0 history-reading tests
   test_smoke.py             - Lifecycle and event handler smoke tests
 manifest.ini                - NVDA add-on manifest
@@ -78,4 +78,4 @@ The CI workflow runs automatically on your PR. A passing green check is required
 
 ## Key design decisions
 
-Read `CLAUDE.md` before structural changes. It covers UIA polling, WinEvent debounce, content dedup, foreground guard, log levels, and the trade-offs behind them.
+Read `docs/plans/2026-08-02-audit-hardening-design.md` before structural changes. It covers UIA polling, structural identity, per-channel snapshots, silent baselines, foreground privacy, and release hardening.

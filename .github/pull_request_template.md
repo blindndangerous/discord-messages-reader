@@ -4,6 +4,8 @@
 
 ## Checklist
 
-- [ ] Tests pass (`pytest`)
+- [ ] Locked environment installed (`uv sync --locked`)
+- [ ] Tests pass (`uv run pytest`)
+- [ ] Ruff and mypy pass
 - [ ] New behaviour is covered by tests
-- [ ] `CLAUDE.md` updated if a design decision changed
+- [ ] Development notes and design documentation updated if behavior changed

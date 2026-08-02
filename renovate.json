@@ -1,21 +1,31 @@
 {
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
-  "extends": ["config:recommended"],
+  "extends": [
+    "config:recommended",
+    "helpers:pinGitHubActionDigests"
+  ],
+  "enabledManagers": [
+    "github-actions",
+    "pep621",
+    "pre-commit"
+  ],
   "pinDigests": true,
   "packageRules": [
     {
-      "matchDepTypes": ["devDependencies"],
-      "automerge": true
-    },
-    {
-      "matchManagers": ["github-actions"],
-      "automerge": false,
-      "labels": ["dependencies", "github-actions"]
-    },
-    {
-      "matchManagers": ["pip_requirements"],
-      "automerge": false,
+      "description": "Update PEP 621 development dependencies and uv.lock",
+      "matchManagers": ["pep621"],
+      "rangeStrategy": "bump",
       "labels": ["dependencies", "python"]
+    },
+    {
+      "description": "Update pre-commit hooks",
+      "matchManagers": ["pre-commit"],
+      "labels": ["dependencies", "pre-commit"]
+    },
+    {
+      "description": "Update immutable GitHub Actions pins and version comments",
+      "matchManagers": ["github-actions"],
+      "labels": ["dependencies", "github-actions"]
     }
   ],
   "lockFileMaintenance": {

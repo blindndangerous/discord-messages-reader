@@ -1,4 +1,4 @@
-# Discord Messages Reader - Claude Code Notes
+# Discord Messages Reader - Development Notes
 
 ## Project Layout
 
@@ -9,9 +9,9 @@ appModules/
   discordcanary/__init__.py - Re-exports AppModule for Discord Canary
 tests/
   conftest.py               - NVDA stub installation + app_module fixture
-  test_filter.py            - _filterAndAnnounce unit tests
-  test_announce.py          - _scheduleAnnounce / _doAnnounce unit tests
-  test_uia.py               - _getLatestMessageViaUIA mock tests
+  test_filter.py            - Content normalization and safety tests
+  test_announce.py          - Snapshot diff and announcement tests
+  test_uia.py               - Structural UIA snapshot tests
   test_smoke.py             - Lifecycle and event handler smoke tests
 manifest.ini                - NVDA add-on manifest
 build.py                    - Creates dist/*.nvda-addon (ZIP)
@@ -27,8 +27,8 @@ uv run ruff check .         # lint
 uv run mypy appModules/discord/  # type check
 ```
 
-Pytest is installed at:
-`C:\Users\<username>\AppData\Roaming\Python\Python313\Scripts\pytest.exe`
+Use Python 3.13, matching NVDA 2026.1. Install the locked environment with
+`uv sync --locked`.
 
 ## GitHub Attribution
 
@@ -51,43 +51,36 @@ Then restart NVDA (Ctrl+Alt+N) to reload.
 
 ## Key Design Decisions
 
-- **UIA polling (500ms)** is the primary message detection mechanism.
-  IAccessible WinEvent hooks are unreliable in Discord's Chromium renderer
-  when focus is in the edit field.
-- **WinEvent hook** is kept only as a fast-path trigger and for `_lastHookTime`
-  (used to suppress spurious `event_valueChange` when Discord clears the edit
-  field after sending a message). It is debounced to avoid stacking UIA reads
-  during navigation.
+- **UIA polling (500ms)** is the only automatic message-detection path.
+- **Structural discovery** selects the UIA list below Discord's `main` landmark
+  and accepts only its `ListItem` children. Text heuristics must not determine
+  whether a control is a message.
+- **Per-channel snapshots** use Discord channel identity and UIA runtime IDs.
+  Content fingerprints are occurrence-aware fallbacks, not global dedup keys.
+- **Silent baselines** apply on startup, channel changes, foreground return,
+  unmute, and recovery. Existing content must never be announced as new.
 - **`core.callLater`** is used for all timer scheduling. It is thread-safe
   (internally posts to the main thread), so `_schedulePoll` can be called from
   any thread, including the Dummy-N worker thread NVDA uses when Discord
   launches while NVDA is already running.
-- **Message list caching** (`_cachedMsgList`/`_cachedMsgListName`): the
-  expensive `FindAll` UIA tree walk is skipped on subsequent polls when the
-  element is still valid. The cache is invalidated on COM errors or when the
-  element name changes (channel switch). Implemented in `_getMsgListViaUIA`.
-- **`disableBrowseModeByDefault = True`** suppresses NVDA's virtual buffer for
-  Discord, which is the recommended approach for Electron apps.
-- **Message dedup** is content-based only (`_lastText`). The UIA text includes
-  a timestamp, so genuinely new messages always differ.
-- **Foreground guard** in `_uiaRead` prevents announcements when Discord is
-  not the active window.
+- **Foreground and mute guards** apply before every automatic read/output.
+- **`ui.message`** presents user-facing output in speech and braille at normal
+  priority. Do not call `speech.speak(..., Spri.NOW)` for incoming content.
+- **Diagnostics** may log state, counts, and opaque identity only. Never log
+  Discord message text.
+- **Native NVDA events** continue normally. Do not broadly suppress value,
+  live-region, or alert events.
 
 ## Log Level
 
-The add-on uses `log.debug` for per-message lines (UIA read, announcing,
-speaking) so they do not appear in users' INFO-level logs. Load/terminate
-events and errors use `log.info` / `log.warning`.
+The add-on uses debug logging for state and counts only. Load/terminate events
+and errors use info or warning levels. Message bodies are never logged.
 
 ## Discord PTB / Canary
 
-`discordptb/__init__.py` and `discordcanary/__init__.py` each contain a
-single line: `from discord import AppModule`. NVDA matches add-on AppModules
-by executable name (without extension, lowercase).
+`discordptb/__init__.py` and `discordcanary/__init__.py` re-export through
+`from ..discord import AppModule`. NVDA matches add-on AppModules by executable
+name without extension, lowercase.
 
-## Supported Discord Formats
-
-IAccessible name format: `"username , body , HH:MM AM"`
-UIA plain-text format: the name IS the message body (less common path)
-
-Both are handled by `_filterAndAnnounce` and `_doAnnounce`.
+Full design and audit rationale:
+`docs/plans/2026-08-02-audit-hardening-design.md`.

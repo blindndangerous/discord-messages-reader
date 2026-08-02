@@ -24,7 +24,7 @@
 
 **Files:** `appModules/discord/__init__.py`, `tests/conftest.py`, `tests/test_uia.py`, `tests/test_announce.py`, `tests/test_history.py`, `tests/test_smoke.py`.
 
-1. Add failing tests for ARIA message discovery, stable channel identity, first-read silence, channel-change silence, foreground-return silence, repeated identical messages, and ordered bursts.
+1. Add failing tests for message-list discovery below the `main` landmark, stable channel identity, first-read silence, channel-change silence, foreground-return silence, repeated identical messages, and ordered bursts.
 2. Add immutable message/snapshot data structures and runtime-ID fallback identities.
 3. Replace duplicated text filters with structural snapshot extraction.
 4. Replace global `_lastText` with bounded per-channel snapshot state.
@@ -55,7 +55,7 @@
 
 ## Task 5: CI and release security
 
-**Files:** `.github/workflows/ci.yml`, `.github/workflows/security.yml`, `.github/workflows/release.yml`, `.github/dependabot.yml`, `requirements-dev.txt`, `CONTRIBUTING.md`, `SECURITY.md`.
+**Files:** `.github/workflows/ci.yml`, `.github/workflows/security.yml`, `.github/workflows/release.yml`, `renovate.json`, `requirements-dev.txt`, `CONTRIBUTING.md`, `SECURITY.md`.
 
 1. Pin all actions to verified full commit SHAs with version comments.
 2. Use Python 3.13 and `uv sync --locked` everywhere.

@@ -22,7 +22,7 @@ Could reduce nominal latency, but requires strict hook-thread ownership, message
 
 ### Structural UIA snapshots with one polling path
 
-Selected. Discord exposes a channel document with a stable channel URL and message nodes with ARIA `message` roles and UIA runtime IDs. Each poll takes a bounded ordered snapshot, compares it with the previous snapshot for that channel, and announces only additions. One path removes hook lifecycle and duplicate-event behavior.
+Selected. Discord exposes a channel document with a stable channel URL and a message list below its `main` landmark. Its `ListItem` children provide ordered messages and UIA runtime IDs. Each poll takes a bounded ordered snapshot, compares it with the previous snapshot for that channel, and announces only additions. One path removes hook lifecycle and duplicate-event behavior.
 
 ## Runtime architecture
 
@@ -31,7 +31,8 @@ Selected. Discord exposes a channel document with a stable channel URL and messa
 Discovery uses structural UIA conditions:
 
 - channel identity: current Discord channel document value/URL;
-- message entries: descendants whose ARIA role is `message`;
+- message container: the UIA list below the `main` landmark;
+- message entries: direct `ListItem` children of that container;
 - item identity: UIA runtime ID, with occurrence-aware text fingerprints only as fallback.
 
 Snapshots preserve visible order and use bounded storage. A burst is announced in order through one coalesced user-facing notification, capped for safe speech/braille length with an explicit overflow count. Existing history gestures read the current structural snapshot.
@@ -62,7 +63,7 @@ WinEvent hooks, broad `event_valueChange` suppression, and custom live-region/al
 - Unit tests cover silent baselines, channel changes, foreground transitions, identical messages, bursts, structural filtering, sanitization, braille-capable output, imports, and deterministic builds.
 - Static gates: Ruff, mypy, Bandit, pip-audit, OSV, Trivy, and Gitleaks where locally available.
 - Package inspection verifies contents, paths, timestamps, and repeatable hash.
-- Live NVDA MCP session verifies NVDA 2026.1.1 connection, speech, braille, focus, state, and add-on behavior in Discord.
+- Live NVDA MCP session verifies NVDA 2026.1.1 connection, focus, state, gesture execution, deterministic speech capture, and add-on behavior in Discord. Braille presentation uses `ui.message` and is captured when an active braille output is available.
 
 ## Deferred work
 

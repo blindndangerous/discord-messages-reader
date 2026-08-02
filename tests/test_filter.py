@@ -1,170 +1,30 @@
-"""Unit tests for _filterAndAnnounce — message filtering logic.
+"""Untrusted Discord text normalization tests."""
 
-These tests verify that the filter correctly passes real messages and
-rejects noise (status changes, typing indicators, empty bodies, timestamps).
-"""
-
-from unittest.mock import MagicMock
-
-import pytest
-
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
+from discord import MessageEntry
 
 
-def _make_filter_spy(app_module):
-    """Patch _scheduleAnnounce so we can assert whether a message was passed."""
-    spy = MagicMock()
-    app_module._scheduleAnnounce = spy
-    return spy
+class TestSanitizeText:
+    def test_strips_c0_and_c1_controls(self, app_module):
+        text = "hello\x00\x07\x1f world\x7f\x85"
 
+        assert app_module._sanitizeText(text) == "hello world"
 
-# ---------------------------------------------------------------------------
-# Status suffix filtering
-# ---------------------------------------------------------------------------
+    def test_strips_bidirectional_formatting_controls(self, app_module):
+        text = "safe\u202eevil\u202c\u2066text\u2069\u061c\u200f"
 
+        assert app_module._sanitizeText(text) == "safeeviltext"
 
-class TestStatusSuffixes:
-    @pytest.mark.parametrize(
-        "suffix",
-        [
-            ", Online",
-            ", Offline",
-            ", Idle",
-            ", Do Not Disturb",
-            ", Streaming",
-        ],
-    )
-    def test_status_suffix_is_filtered(self, app_module, suffix):
-        spy = _make_filter_spy(app_module)
-        app_module._filterAndAnnounce("SomeUser" + suffix)
-        spy.assert_not_called()
+    def test_preserves_meaningful_zero_width_joiner(self, app_module):
+        family = "👩\u200d👩\u200d👧\u200d👦"
 
-    def test_non_status_message_is_not_filtered_by_suffix(self, app_module):
-        spy = _make_filter_spy(app_module)
-        app_module._filterAndAnnounce("hey can you come , online for a bit , 9:00 AM")
-        spy.assert_called_once()
+        assert app_module._sanitizeText(family) == family
 
-    @pytest.mark.parametrize(
-        "suffix",
-        [
-            ", online",
-            ", offline",
-            ", idle",
-            ", do not disturb",
-            ", streaming",
-            ", ONLINE",
-            ", Offline",
-            ", IDLE",
-        ],
-    )
-    def test_status_suffix_filtered_case_insensitively(self, app_module, suffix):
-        """Discord may vary casing; filtering must be case-insensitive."""
-        spy = _make_filter_spy(app_module)
-        app_module._filterAndAnnounce("SomeUser" + suffix)
-        spy.assert_not_called()
+    def test_collapses_whitespace(self, app_module):
+        assert app_module._sanitizeText("one\r\n\t two   three") == "one two three"
 
-    def test_status_suffix_with_trailing_whitespace_is_filtered(self, app_module):
-        spy = _make_filter_spy(app_module)
-        app_module._filterAndAnnounce("SomeUser, Online ")
-        spy.assert_not_called()
+    def test_empty_sanitized_message_is_not_presented(self, app_module):
+        app_module._presentMessages((MessageEntry(("runtime", 1), "\x00\u202e"),))
 
+        import sys
 
-# ---------------------------------------------------------------------------
-# Typing indicator filtering
-# ---------------------------------------------------------------------------
-
-
-class TestTypingIndicators:
-    @pytest.mark.parametrize(
-        "text",
-        [
-            "Alice is typing...",
-            "Alice and Bob are typing...",
-            "ALICE IS TYPING",  # case-insensitive
-        ],
-    )
-    def test_typing_indicator_is_filtered(self, app_module, text):
-        spy = _make_filter_spy(app_module)
-        app_module._filterAndAnnounce(text)
-        spy.assert_not_called()
-
-
-# ---------------------------------------------------------------------------
-# IAccessible format: "username , body , HH:MM AM"
-# ---------------------------------------------------------------------------
-
-
-class TestIAccessibleFormat:
-    def test_valid_message_is_passed(self, app_module):
-        spy = _make_filter_spy(app_module)
-        app_module._filterAndAnnounce("alice , hello there , 9:04 AM")
-        spy.assert_called_once_with("alice , hello there , 9:04 AM")
-
-    def test_message_with_comma_in_body(self, app_module):
-        spy = _make_filter_spy(app_module)
-        app_module._filterAndAnnounce("alice , yes , no , maybe , 9:04 AM")
-        spy.assert_called_once()
-
-    def test_missing_timestamp_colon_is_filtered(self, app_module):
-        """Last part must contain ':' to be a timestamp."""
-        spy = _make_filter_spy(app_module)
-        app_module._filterAndAnnounce("alice , hello , notaTimestamp")
-        spy.assert_not_called()
-
-    def test_empty_body_is_filtered(self, app_module):
-        """'user , , 9:04 AM' has an empty body."""
-        spy = _make_filter_spy(app_module)
-        app_module._filterAndAnnounce("alice ,  , 9:04 AM")
-        spy.assert_not_called()
-
-    def test_two_part_with_no_body_is_filtered(self, app_module):
-        """Two-part split where parts[1:-1] is empty."""
-        spy = _make_filter_spy(app_module)
-        app_module._filterAndAnnounce("alice , 9:04 AM")
-        # Only 2 parts, parts[1:-1] == [] → body == "" → filtered
-        spy.assert_not_called()
-
-
-# ---------------------------------------------------------------------------
-# Plain-text / UIA format
-# ---------------------------------------------------------------------------
-
-
-class TestPlainTextFormat:
-    def test_new_divider_is_filtered(self, app_module):
-        spy = _make_filter_spy(app_module)
-        app_module._filterAndAnnounce("New")
-        spy.assert_not_called()
-
-    def test_short_string_is_filtered(self, app_module):
-        spy = _make_filter_spy(app_module)
-        app_module._filterAndAnnounce("hi")
-        spy.assert_not_called()
-
-    @pytest.mark.parametrize(
-        "ts",
-        [
-            "9:04 AM",
-            "9:04",
-            "12:30 PM",
-            "12:30",
-            "1:00am",
-            "1:00 pm",
-        ],
-    )
-    def test_timestamp_only_is_filtered(self, app_module, ts):
-        spy = _make_filter_spy(app_module)
-        app_module._filterAndAnnounce(ts)
-        spy.assert_not_called()
-
-    def test_plain_message_is_passed(self, app_module):
-        spy = _make_filter_spy(app_module)
-        app_module._filterAndAnnounce("hello from a friend")
-        spy.assert_called_once_with("hello from a friend")
-
-    def test_minimum_length_three_is_passed(self, app_module):
-        spy = _make_filter_spy(app_module)
-        app_module._filterAndAnnounce("hey")
-        spy.assert_called_once()
+        sys.modules["ui"].message.assert_not_called()

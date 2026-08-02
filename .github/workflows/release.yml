@@ -3,7 +3,6 @@ name: Release
 on:
   push:
     tags: ["v*"]
-  workflow_dispatch:
 
 permissions:
   contents: read
@@ -18,127 +17,37 @@ defaults:
 
 jobs:
   verify-tag:
-    name: Verify tag matches CHANGELOG + manifest
+    name: Verify release tag
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
           fetch-depth: 0
-      - name: Confirm tag has CHANGELOG entry
+          persist-credentials: false
+
+      - name: Confirm tag belongs to main
+        run: |
+          git fetch --no-tags origin main:refs/remotes/origin/main
+          tag_commit=$(git rev-parse "${GITHUB_REF}^{commit}")
+          if ! git merge-base --is-ancestor "$tag_commit" refs/remotes/origin/main; then
+            echo "::error::Release tag must point to a commit on origin/main"
+            exit 1
+          fi
+
+      - name: Confirm tag matches CHANGELOG and manifest
         run: |
           tag="${GITHUB_REF#refs/tags/v}"
-          if ! grep -q "^## \[$tag\]" CHANGELOG.md; then
+          if ! grep -Fq "## [$tag]" CHANGELOG.md; then
             echo "::error::Tag v$tag has no CHANGELOG entry"
             exit 1
           fi
-      - name: Confirm tag matches manifest.ini version
-        run: |
-          tag="${GITHUB_REF#refs/tags/v}"
           version=$(grep -E '^version' manifest.ini | head -1 | sed -E 's/version *= *"?([^" ]+)"?/\1/')
           if [ "$tag" != "$version" ]; then
             echo "::error::Tag v$tag does not match manifest.ini version $version"
             exit 1
           fi
 
-  test:
-    name: Test on release commit
-    needs: verify-tag
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v6
-      - name: Install uv
-        uses: astral-sh/setup-uv@v8.1.0
-        with:
-          enable-cache: true
-      - name: Set up Python
-        uses: actions/setup-python@v6
-        with:
-          python-version: "3.14"
-      - name: Install dependencies
-        run: uv sync --all-extras
-      - name: Pre-commit
-        run: uv run pre-commit run --all-files --show-diff-on-failure
-      - name: Pytest
-        run: uv run pytest --tb=short
-
-  sbom:
-    name: Generate SBOM
-    needs: test
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v6
-      - name: Generate CycloneDX SBOM
-        uses: anchore/sbom-action@v0
-        with:
-          format: cyclonedx-json
-          output-file: sbom.cdx.json
-      - name: Generate SPDX SBOM
-        uses: anchore/sbom-action@v0
-        with:
-          format: spdx-json
-          output-file: sbom.spdx.json
-      - name: Upload SBOMs
-        uses: actions/upload-artifact@v7
-        with:
-          name: sbom
-          path: |
-            sbom.cdx.json
-            sbom.spdx.json
-          retention-days: 90
-
-  build:
-    name: Build .nvda-addon
-    needs: test
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v6
-      - name: Install uv
-        uses: astral-sh/setup-uv@v8.1.0
-      - name: Set up Python
-        uses: actions/setup-python@v6
-        with:
-          python-version: "3.14"
-      - name: Build addon
-        run: uv run python build.py
-      - name: Upload addon artefact
-        uses: actions/upload-artifact@v7
-        with:
-          name: dist
-          path: dist/*.nvda-addon
-          retention-days: 90
-
-  release:
-    name: GitHub release
-    needs: [build, sbom]
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-      id-token: write
-    steps:
-      - uses: actions/checkout@v6
-        with:
-          fetch-depth: 0
-
-      - name: Download artifacts
-        uses: actions/download-artifact@v8
-        with:
-          path: ./artefacts
-
-      - name: Install cosign
-        uses: sigstore/cosign-installer@v4.1.1
-
-      - name: Sign artefacts (keyless via OIDC)
-        run: |
-          shopt -s nullglob
-          for f in ./artefacts/dist/* ./artefacts/sbom/*; do
-            [ -f "$f" ] || continue
-            cosign sign-blob --yes \
-              --bundle "$f.bundle" \
-              --output-signature "$f.sig" \
-              "$f"
-          done
-
-      - name: Extract release notes from CHANGELOG
+      - name: Extract release notes
         run: |
           tag="${GITHUB_REF#refs/tags/v}"
           awk -v tag="$tag" '
@@ -153,17 +62,224 @@ jobs:
             exit 1
           fi
 
+      - name: Upload release notes
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: release-notes
+          path: CHANGELOG_RELEASE.md
+          retention-days: 7
+
+  verify:
+    name: Verify release commit on Windows
+    needs: verify-tag
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
+        with:
+          enable-cache: true
+          version: "0.11.26"
+
+      - name: Set up Python
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: "3.13.12"
+
+      - name: Install locked dependencies
+        run: uv sync --locked --all-extras
+
+      - name: Ruff — lint
+        run: uv run --locked ruff check .
+
+      - name: Ruff — format check
+        run: uv run --locked ruff format build.py tests/ --check
+
+      - name: Mypy — type check
+        run: uv run --locked mypy appModules/discord/
+
+      - name: Bandit — security scan
+        run: uv run --locked bandit -r appModules/ -c pyproject.toml
+
+      - name: pip-audit — dependency CVE scan
+        run: uv run --locked pip-audit
+
+      - name: Pytest
+        run: uv run --locked pytest --tb=short
+
+  security:
+    name: Verify release security
+    needs: verify-tag
+    permissions:
+      contents: read
+    uses: ./.github/workflows/security.yml
+
+  build:
+    name: Build reproducible .nvda-addon
+    needs: [verify, security]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: "3.13.12"
+
+      - name: Build add-on twice and compare
+        run: |
+          python build.py
+          artifact=(dist/*.nvda-addon)
+          if [ "${#artifact[@]}" -ne 1 ]; then
+            echo "::error::Expected exactly one add-on artifact"
+            exit 1
+          fi
+          first_hash=$(sha256sum "${artifact[0]}" | cut -d ' ' -f 1)
+          python build.py
+          second_hash=$(sha256sum "${artifact[0]}" | cut -d ' ' -f 1)
+          if [ "$first_hash" != "$second_hash" ]; then
+            echo "::error::Repeated builds produced different SHA-256 hashes"
+            exit 1
+          fi
+
+      - name: Upload add-on artifact
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: unsigned-addon
+          path: dist/*.nvda-addon
+          if-no-files-found: error
+          retention-days: 90
+
+  sbom:
+    name: Generate SBOM
+    needs: [verify, security]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+
+      - name: Generate CycloneDX SBOM
+        uses: anchore/sbom-action@e22c389904149dbc22b58101806040fa8d37a610 # v0.24.0
+        with:
+          format: cyclonedx-json
+          output-file: sbom.cdx.json
+
+      - name: Generate SPDX SBOM
+        uses: anchore/sbom-action@e22c389904149dbc22b58101806040fa8d37a610 # v0.24.0
+        with:
+          format: spdx-json
+          output-file: sbom.spdx.json
+
+      - name: Upload SBOMs
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: unsigned-sbom
+          path: |
+            sbom.cdx.json
+            sbom.spdx.json
+          if-no-files-found: error
+          retention-days: 90
+
+  sign:
+    name: Sign release assets
+    needs: [build, sbom]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: Download unsigned assets
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          pattern: unsigned-*
+          merge-multiple: true
+          path: artifacts
+
+      - name: Install cosign
+        uses: sigstore/cosign-installer@cad07c2e89fa2edd6e2d7bab4c1aa38e53f76003 # v4.1.1
+
+      - name: Sign assets with keyless OIDC
+        run: |
+          mkdir signed
+          find artifacts -maxdepth 1 -type f -print0 | sort -z | while IFS= read -r -d '' source; do
+            destination="signed/$(basename "$source")"
+            cp "$source" "$destination"
+          done
+          (
+            cd signed
+            find . -maxdepth 1 -type f ! -name SHA256SUMS -printf '%f\0' \
+              | sort -z \
+              | xargs -0 sha256sum
+          ) > signed/SHA256SUMS
+          find signed -maxdepth 1 -type f ! -name '*.bundle' ! -name '*.sig' -print0 \
+            | sort -z \
+            | while IFS= read -r -d '' destination; do
+            cosign sign-blob --yes \
+              --bundle "$destination.bundle" \
+              --output-signature "$destination.sig" \
+              "$destination"
+          done
+          if ! find signed -maxdepth 1 -type f -name '*.bundle' -print -quit | grep -q .; then
+            echo "::error::No release assets were signed"
+            exit 1
+          fi
+
+      - name: Upload signed release assets
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: signed-release-assets
+          path: signed/*
+          if-no-files-found: error
+          retention-days: 90
+
+  publish:
+    name: Publish GitHub release
+    needs: sign
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download signed assets
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: signed-release-assets
+          path: release-assets
+
+      - name: Download release notes
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: release-notes
+          path: release-metadata
+
       - name: Create GitHub release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
+          read -r tag_type tag_sha < <(
+            gh api "repos/${GITHUB_REPOSITORY}/git/ref/tags/${GITHUB_REF_NAME}" \
+              --jq '[.object.type, .object.sha] | @tsv'
+          )
+          for _ in {1..5}; do
+            if [ "$tag_type" != "tag" ]; then
+              break
+            fi
+            read -r tag_type tag_sha < <(
+              gh api "repos/${GITHUB_REPOSITORY}/git/tags/${tag_sha}" \
+                --jq '[.object.type, .object.sha] | @tsv'
+            )
+          done
+          if [ "$tag_type" != "commit" ] || [ "$tag_sha" != "$GITHUB_SHA" ]; then
+            echo "::error::Release tag no longer resolves to the verified workflow commit"
+            exit 1
+          fi
           gh release create "$GITHUB_REF_NAME" \
             --title "$GITHUB_REF_NAME" \
-            --notes-file CHANGELOG_RELEASE.md \
+            --notes-file release-metadata/CHANGELOG_RELEASE.md \
             --verify-tag \
-            ./artefacts/dist/* \
-            ./artefacts/sbom/* \
-            ./artefacts/dist/*.bundle \
-            ./artefacts/dist/*.sig \
-            ./artefacts/sbom/*.bundle \
-            ./artefacts/sbom/*.sig
+            ./release-assets/*

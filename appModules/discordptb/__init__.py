@@ -1,1 +1,1 @@
-from discord import AppModule as AppModule
+from ..discord import AppModule as AppModule

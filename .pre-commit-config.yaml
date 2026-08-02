@@ -35,7 +35,7 @@ repos:
       - id: ruff
         args: [--fix]
       - id: ruff-format
-        files: ^tests/   # only format tests/ — appModules/ uses tabs by NVDA convention
+        files: ^(build\.py|tests/)  # appModules/ keeps NVDA's tab-indentation convention
 
   - repo: https://github.com/PyCQA/bandit
     rev: 1.9.4

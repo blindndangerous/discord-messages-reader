@@ -27,8 +27,8 @@ body:
       label: NVDA version
       description: >
         Press NVDA+N to open the NVDA menu, then go to Help > About NVDA.
-        The version number is at the top of the dialog (e.g. 2024.1).
-      placeholder: "e.g. 2024.1"
+        The version number is at the top of the dialog (e.g. 2026.1.1).
+      placeholder: "e.g. 2026.1.1"
     validations:
       required: true
 
@@ -75,5 +75,7 @@ body:
         4. Open the log: NVDA menu > Tools > View Log.
         5. Select all (Ctrl+A), copy (Ctrl+C), and paste it here.
 
+        Before attaching the log, remove Discord message text, usernames, channel
+        names, tokens, local paths, email addresses, and any other private data.
         You can set the log level back to Info after you have collected the log.
       render: text

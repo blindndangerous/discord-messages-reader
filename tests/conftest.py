@@ -1,7 +1,7 @@
 """Install NVDA module stubs before any source module is imported.
 
 NVDA's Python environment provides modules (appModuleHandler, logHandler,
-UIAHandler, speech, wx, api) that are not available in a plain Python install.
+UIAHandler, ui, core, and api) that are not available in a plain Python install.
 We create lightweight stubs and register them in sys.modules so that
 `import discord` (our AppModule package) can be resolved in tests.
 """
@@ -49,15 +49,9 @@ def _install_stubs():
     m = _stub("UIAHandler")
     m.handler = MagicMock()
 
-    # speech
-    m = _stub("speech")
-    m.speak = MagicMock()
-    m.Spri = MagicMock()
-    m.Spri.NOW = "NOW"
-
-    # wx — CallAfter is still used by some event paths
-    m = _stub("wx")
-    m.CallAfter = MagicMock()
+    # ui — user-facing messages reach both speech and braille in NVDA.
+    m = _stub("ui")
+    m.message = MagicMock()
 
     # core — callLater is the NVDA-idiomatic thread-safe timer
     m = _stub("core")
@@ -66,11 +60,6 @@ def _install_stubs():
     # api — NVDA object focus API
     m = _stub("api")
     m.getForegroundObject = MagicMock(return_value=None)
-
-    # NVDAObjects (imported at module level in original; unused after cleanup
-    # but kept in case of import-time side effects from other addons)
-    _stub("NVDAObjects")
-    _stub("NVDAObjects.IAccessible")
 
 
 _install_stubs()
@@ -85,22 +74,20 @@ import pytest
 
 @pytest.fixture()
 def app_module():
-    """Return a live AppModule instance with Win32 and wx calls stubbed out."""
-    with (
-        patch("ctypes.windll") as mock_windll,
-        patch("wx.CallAfter") as _mock_after,
-        patch("core.callLater", return_value=MagicMock()) as _mock_timer,
-    ):
-        mock_windll.user32.SetWinEventHook.return_value = 0xDEAD
-        mock_windll.user32.UnhookWinEvent.return_value = True
-
+    """Return a live AppModule instance with timer calls stubbed out."""
+    with patch("core.callLater", return_value=MagicMock()):
         # Import here so stubs are in place
         from discord import AppModule
 
+        sys.modules["api"].getForegroundObject.reset_mock()
+        sys.modules["api"].getForegroundObject.return_value = None
+        sys.modules["UIAHandler"].handler.clientObject = None
         instance = AppModule()
+        sys.modules["ui"].message.reset_mock()
+        sys.modules["ui"].message.side_effect = None
+        sys.modules["logHandler"].log.reset_mock()
         yield instance
 
-        # Clean up so terminate() doesn't explode on real ctypes calls
+        # Clean up without scheduling another poll.
         instance._terminated = True
-        instance._hook = None
         instance._pollTimer = None

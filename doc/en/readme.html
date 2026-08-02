@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Discord Messages Reader help</title>
+</head>
+<body>
+<h1>Discord Messages Reader</h1>
+
+<p>Discord Messages Reader is an NVDA add-on for Discord stable, PTB, and Canary. It checks Discord's UI Automation tree every 500 milliseconds and presents new messages through speech and braille.</p>
+
+<h2>Requirements</h2>
+
+<ul>
+<li>NVDA 2026.1 (tested with NVDA 2026.1.1)</li>
+<li>A Windows version supported by NVDA 2026.1</li>
+<li>Discord stable, PTB, or Canary</li>
+</ul>
+
+<h2>Using the add-on</h2>
+
+<p>Open a Discord channel or direct message. The add-on announces new messages only while Discord is the active window. It establishes a silent baseline after startup, channel changes, foreground return, and unmute, so existing messages are not announced as new.</p>
+
+<h2>Keyboard commands</h2>
+
+<ul>
+<li>NVDA+Alt+Shift+D toggles automatic announcements.</li>
+<li>Alt+1 reads the most recent message.</li>
+<li>Alt+2 through Alt+9 read the second through ninth most recent messages.</li>
+<li>Alt+0 reads the tenth most recent message.</li>
+</ul>
+
+<p>You can change these commands in NVDA's Input Gestures dialog under Discord Messages Reader.</p>
+
+<h2>Limitations and privacy</h2>
+
+<p>The add-on can read only messages currently exposed in Discord's accessibility tree. Discord updates can change that tree and temporarily affect detection.</p>
+
+<p>Speech can disclose private messages to nearby people. Use NVDA+Alt+Shift+D when you do not want automatic announcements. Before sharing an NVDA log in a bug report, remove Discord message text, usernames, channel names, tokens, local paths, email addresses, and other private data.</p>
+</body>
+</html>
