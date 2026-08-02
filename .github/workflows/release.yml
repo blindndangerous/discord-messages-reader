@@ -245,6 +245,12 @@ jobs:
     permissions:
       contents: write
     steps:
+      - name: Check out verified tag
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
       - name: Download signed assets
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
         with:
