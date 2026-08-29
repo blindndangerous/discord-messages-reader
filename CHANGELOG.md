@@ -8,6 +8,53 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
+## [2.1.0] - 2026-08-29
+
+### Fixed
+
+- Incoming messages are announced again. Discord now appends a message id to the
+  channel URL (`/channels/<guild>/<channel>/<message>`), which no longer matched
+  the expected channel URL shape, so every poll found no channel document and
+  silently established a baseline instead of announcing. Channel identity now
+  ignores the trailing message id, so it also stays stable as that id changes.
+
+- Grouped consecutive messages name their author again. Discord omits the header
+  on a run of messages from one person, so those entries carried no author at
+  all. The author of a run is now carried forward onto its continuations, which
+  is what Discord shows visually.
+
+### Changed
+
+- Announcements are composed from Discord's own labelled message parts instead
+  of a concatenation of every descendant. Both the list item name and the
+  article name run the header, body, reactions and toolbar together; the parts
+  are identified structurally by Discord's `message-username-`,
+  `message-content-` and `message-timestamp-` automation IDs, so no presentation
+  text is inspected.
+
+- Announcements no longer read the timestamp. Both the visible short form and
+  the hidden long form (`Friday, August 28, 2026 11:53 PM`) are dropped.
+
+- Announcements no longer read embed and attachment chrome — `Remove all
+  embeds`, `Play`, `Image`, `Open Link`, and the audio player's transport
+  controls. Embed *content* is kept: a shared link still announces its platform,
+  channel and title. Chrome is separated from content structurally, by whether
+  an element carries a `description` child.
+
+- Reaction shortcodes, "Click to react" labels and the hover toolbar
+  (`Add Reaction`, `Edit`, `Forward`, `More`) are no longer announced.
+
+- Structural discovery failures log a debug reason (`no-uia-root`,
+  `no-documents`, `no-channel-document`, `no-message-list`) when the state
+  changes, so a silent add-on can be diagnosed from the NVDA log. No Discord
+  content is logged.
+
+### Security
+
+- `pip` 26.1.2 to 26.2.1, resolving PYSEC-2026-3721.
+
+---
+
 ## [2.0.0] - 2026-08-02
 
 ### Added

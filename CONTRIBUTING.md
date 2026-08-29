@@ -25,6 +25,36 @@ uv run pytest
 
 The test suite runs without NVDA installed. It uses stubs for the NVDA modules. If you add new behaviour, add a test for it. CI runs the tests on every pull request.
 
+## Running the full check suite
+
+`scripts/check.ps1` runs the same checks CI runs, in one pass:
+
+```
+powershell -NoProfile -File scripts/check.ps1
+```
+
+It runs ruff (lint and format check), mypy, pytest, bandit, pip-audit, osv-scanner, and a Trivy filesystem scan. Every check runs even if an earlier one fails, so one run shows everything that is broken. A summary table is printed at the end and the script exits non-zero if any check failed. The whole suite takes about 30 seconds.
+
+osv-scanner and Trivy are external tools and are not installed by `uv sync`. Install them with:
+
+```
+winget install Google.OSVScanner
+winget install AquaSecurity.Trivy
+```
+
+No tool versions are pinned. The script uses whatever `uv`, `osv-scanner`, and `trivy` are on your PATH. If a scanner is missing, its check is reported as `SKIPPED` with a loud banner rather than passing silently, and the rest of the suite still runs.
+
+## Git hooks
+
+The project uses `pre-commit` for both commit-time and push-time hooks. Install both:
+
+```
+pre-commit install
+pre-commit install --hook-type pre-push
+```
+
+The commit hooks are the fast ones: whitespace and file checks, gitleaks, actionlint, ruff, bandit, and mypy. The pre-push hook is a single `local-ci` hook that runs `scripts/check.ps1`. It blocks the push if any check fails, so CI failures are caught before they reach GitHub. Nothing runs at both stages.
+
 ## Project layout
 
 ```

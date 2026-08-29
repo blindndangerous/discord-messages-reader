@@ -1,6 +1,6 @@
 [project]
 name = "discord-messages-reader"
-version = "2.0.0"
+version = "2.1.0"
 description = "NVDA add-on that announces incoming Discord chat messages automatically via UIA polling."
 readme = "README.md"
 requires-python = ">=3.13,<3.14"
@@ -28,7 +28,7 @@ source = ["appModules"]
 omit = ["appModules/discordptb/*", "appModules/discordcanary/*"]
 
 [tool.coverage.report]
-fail_under = 80
+fail_under = 95
 show_missing = true
 
 [tool.ruff]
