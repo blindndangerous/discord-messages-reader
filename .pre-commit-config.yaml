@@ -1,3 +1,7 @@
+# Hooks below run at commit time unless they declare their own `stages`.
+# This keeps the fast commit-stage hooks out of the slower pre-push gate.
+default_stages: [pre-commit]
+
 repos:
   # Language-agnostic baseline.
   - repo: https://github.com/pre-commit/pre-commit-hooks
@@ -50,3 +54,16 @@ repos:
       - id: mypy
         args: [--config-file, pyproject.toml]
         files: ^appModules/discord/
+
+  # Blocking pre-push gate: the full CI-equivalent suite.
+  # Install with: pre-commit install --hook-type pre-push
+  - repo: local
+    hooks:
+      - id: local-ci
+        name: local CI (ruff, mypy, pytest, bandit, pip-audit, osv-scanner, trivy)
+        entry: powershell -NoProfile -ExecutionPolicy Bypass -File scripts/check.ps1
+        language: system
+        stages: [pre-push]
+        pass_filenames: false
+        always_run: true
+        verbose: true
