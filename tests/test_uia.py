@@ -994,3 +994,189 @@ class TestStructuralEdgePaths:
     def test_channel_identity_rejects_unparseable_urls(self, app_module):
         """urlsplit raises on a malformed IPv6 literal rather than returning a result."""
         assert app_module._channelIdentity("https://[::1/channels/1/2") is None
+
+
+def attachment_only_message(mid, author, article_name):
+    """A message with a header but no text body - an image, sticker or file post."""
+    return Element(
+        aria_role="listitem",
+        control_type=_LIST_ITEM,
+        runtime_id=(2, int(mid)),
+        name="noisy concatenated list item name",
+        children=[
+            Element(
+                aria_role="article",
+                control_type=_GROUP,
+                name=article_name,
+                children=[
+                    Element(
+                        aria_role="heading",
+                        control_type=_HEADING,
+                        children=[
+                            Element(
+                                aria_role="group",
+                                control_type=_GROUP,
+                                automation_id=f"message-username-{mid}",
+                                children=[Element(control_type=_BUTTON, name=author)],
+                            )
+                        ],
+                    )
+                ],
+            )
+        ],
+    )
+
+
+class TestAuthorAttribution:
+    """Announcing a message under the wrong name is the worst possible output."""
+
+    def test_attachment_only_message_does_not_misattribute_the_next_message(self, app_module):
+        """A body-less message must still register its author for the run that follows."""
+        items = [
+            discord_message(mid="1", author="Alice", body="hi there"),
+            attachment_only_message("2", "Bob", "Bob , screenshot.png , 11:53 PM"),
+            discord_message(mid="3", author=None, body="and here is the text"),
+        ]
+
+        first, second, third = texts_for(app_module, items)
+
+        assert first == "Alice, hi there"
+        assert not second.startswith("Alice"), f"attachment misattributed to Alice: {second!r}"
+        assert third == "Bob, and here is the text", f"grouped message misattributed: {third!r}"
+
+    def test_fallback_text_is_not_prefixed_with_a_duplicate_author(self, app_module):
+        """Discord's article name already names the author; prefixing would double it."""
+        items = [
+            discord_message(mid="1", author="Alice", body="hi"),
+            attachment_only_message("2", "Bob", "Bob , screenshot.png , 11:53 PM"),
+        ]
+
+        second = texts_for(app_module, items)[1]
+
+        assert second.count("Bob") == 1, f"author doubled: {second!r}"
+
+    def test_offscreen_article_does_not_misattribute_the_next_message(self, app_module):
+        """A fully scrolled-out message must not leak its predecessor's author forward."""
+        hidden = discord_message(mid="2", author="Bob", body="scrolled away")
+        hidden.children[0].properties[_IS_OFFSCREEN] = True
+        items = [
+            discord_message(mid="1", author="Alice", body="hi there"),
+            hidden,
+            discord_message(mid="3", author=None, body="back in view"),
+        ]
+
+        third = texts_for(app_module, items)[2]
+
+        assert third == "Bob, back in view", f"misattributed after offscreen message: {third!r}"
+
+
+class TestOffscreenHandling:
+    """IsOffscreen must drop Discord's hidden duplicate date, not real body text."""
+
+    def test_partially_scrolled_body_is_not_silently_truncated(self, app_module):
+        """One clipped paragraph must not vanish while its siblings are announced."""
+        article = Element(
+            aria_role="article",
+            control_type=_GROUP,
+            name="Alice , visible first line hidden second line , 1:04 PM",
+            children=[
+                Element(
+                    aria_role="group",
+                    control_type=_GROUP,
+                    automation_id="message-username-1",
+                    children=[Element(control_type=_BUTTON, name="Alice")],
+                ),
+                Element(
+                    aria_role="group",
+                    control_type=_GROUP,
+                    automation_id="message-content-1",
+                    children=[
+                        Element(
+                            aria_role="description",
+                            control_type=_HEADING,
+                            name="visible first line",
+                        ),
+                        Element(
+                            aria_role="description",
+                            control_type=_HEADING,
+                            name="hidden second line",
+                            offscreen=True,
+                        ),
+                    ],
+                ),
+            ],
+        )
+        item = Element(aria_role="listitem", runtime_id=(2, 1), children=[article])
+
+        (text,) = texts_for(app_module, [item])
+
+        assert "hidden second line" in text, f"clipped body text was dropped: {text!r}"
+
+
+class TestDiscoveryDiagnostics:
+    """A silent add-on must be diagnosable from the NVDA log without leaking content."""
+
+    def _log(self):
+        return sys.modules["logHandler"].log
+
+    def test_missing_uia_root_is_reported(self, app_module):
+        root, _document = make_tree("https://discord.com/channels/1/2", [])
+        uia, foreground = install_uia(root)
+        uia.ElementFromHandle.return_value = None
+        self._log().debug.reset_mock()
+
+        assert app_module._getSnapshotViaUIA(foreground) is None
+        assert any("no-uia-root" in str(c) for c in self._log().debug.call_args_list)
+
+    def test_missing_documents_is_reported(self, app_module):
+        root, _document = make_tree("https://discord.com/channels/1/2", [])
+        root.FindAll = MagicMock(return_value=None)
+        _uia, foreground = install_uia(root)
+        self._log().debug.reset_mock()
+
+        assert app_module._getSnapshotViaUIA(foreground) is None
+        assert any("no-documents" in str(c) for c in self._log().debug.call_args_list)
+
+    def test_missing_message_list_is_reported(self, app_module):
+        root, _document = make_tree("https://discord.com/channels/1/2", [])
+        root.lists = []
+        _uia, foreground = install_uia(root)
+        self._log().debug.reset_mock()
+
+        assert app_module._getSnapshotViaUIA(foreground) is None
+        assert any("no-message-list" in str(c) for c in self._log().debug.call_args_list)
+
+    def test_unchanged_discovery_state_is_logged_once(self, app_module):
+        """Polling runs twice a second; an unchanged state must stay silent."""
+        root, _document = make_tree("https://discord.com/channels/1/2", [])
+        root.lists = []
+        _uia, foreground = install_uia(root)
+        self._log().debug.reset_mock()
+
+        for _ in range(10):
+            app_module._getSnapshotViaUIA(foreground)
+
+        states = [c for c in self._log().debug.call_args_list if "no-message-list" in str(c)]
+        assert len(states) == 1
+
+    def test_snapshot_failure_is_warned_once_per_kind(self, app_module):
+        root, _document = make_tree("https://discord.com/channels/1/2", [])
+        _uia, foreground = install_uia(root)
+        type(foreground).windowHandle = property(lambda _self: (_ for _ in ()).throw(RuntimeError("gone")))
+        self._log().warning.reset_mock()
+
+        for _ in range(6):
+            assert app_module._getSnapshotViaUIA(foreground) is None
+
+        assert self._log().warning.call_count == 1
+
+    def test_no_discovery_log_contains_message_text(self, app_module):
+        """Diagnostics may name states and counts, never Discord content."""
+        secret = "sensitive message body"
+        items = [discord_message(mid="1", author="Alice", body=secret)]
+        self._log().debug.reset_mock()
+
+        texts_for(app_module, items)
+
+        for call in self._log().debug.call_args_list:
+            assert secret not in str(call)

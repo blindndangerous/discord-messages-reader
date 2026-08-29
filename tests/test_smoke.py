@@ -159,3 +159,78 @@ class TestNativeNvdaBehavior:
 
     def test_does_not_force_browse_mode_off(self, app_module):
         assert "disableBrowseModeByDefault" not in app_module.__class__.__dict__
+
+
+class TestPollLoopResilience:
+    """The poll loop is the only automatic path; it must never stop rescheduling."""
+
+    def test_poll_reschedules_after_an_unexpected_failure(self, app_module):
+        """An escaped exception must not silently kill the add-on until NVDA restarts."""
+        sys.modules["core"].callLater.reset_mock()
+        app_module._uiaRead = MagicMock(side_effect=RuntimeError("boom"))
+
+        app_module._pollTick()
+
+        sys.modules["core"].callLater.assert_called_once()
+
+    def test_repeated_failures_keep_rescheduling(self, app_module):
+        app_module._uiaRead = MagicMock(side_effect=RuntimeError("boom"))
+
+        for _ in range(5):
+            app_module._pollTick()
+
+        assert sys.modules["core"].callLater.call_count >= 5
+
+    def test_repeated_identical_failures_are_logged_once(self, app_module):
+        """Polling runs twice a second; an unchanged failure must not flood the log."""
+        app_module._uiaRead = MagicMock(side_effect=RuntimeError("boom"))
+        sys.modules["logHandler"].log.warning.reset_mock()
+
+        for _ in range(10):
+            app_module._pollTick()
+
+        assert sys.modules["logHandler"].log.warning.call_count == 1
+
+    def test_a_new_failure_kind_is_logged_again(self, app_module):
+        app_module._uiaRead = MagicMock(side_effect=RuntimeError("boom"))
+        app_module._pollTick()
+        sys.modules["logHandler"].log.warning.reset_mock()
+        app_module._uiaRead = MagicMock(side_effect=ValueError("different"))
+
+        app_module._pollTick()
+
+        assert sys.modules["logHandler"].log.warning.call_count == 1
+
+    def test_terminated_module_stops_rescheduling(self, app_module):
+        app_module._terminated = True
+        sys.modules["core"].callLater.reset_mock()
+
+        app_module._pollTick()
+
+        sys.modules["core"].callLater.assert_not_called()
+
+
+class TestDetachedElementHandling:
+    """Discord's list virtualization detaches elements mid-walk."""
+
+    def test_property_read_survives_a_detached_element(self, app_module):
+        """A COMError from the fallback attribute must not abort the whole snapshot."""
+
+        class Detached:
+            def GetCurrentPropertyValue(self, _property_id):
+                raise OSError("element detached")
+
+            @property
+            def CurrentName(self):
+                raise OSError("element detached")
+
+        assert app_module._getElementProperty(Detached(), 30005, "CurrentName") == ""
+
+    def test_property_read_uses_the_attribute_fallback_when_it_works(self, app_module):
+        class RawFails:
+            CurrentName = "fallback name"
+
+            def GetCurrentPropertyValue(self, _property_id):
+                raise OSError("raw property unavailable")
+
+        assert app_module._getElementProperty(RawFails(), 30005, "CurrentName") == "fallback name"

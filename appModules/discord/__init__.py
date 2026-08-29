@@ -31,6 +31,7 @@ _UIA_TreeScope_Descendants = 4
 # "message-<part>-<message id>". They are identifiers rather than presentation
 # text, so they hold across locales and across Discord's own restyling.
 _AUTHOR_ID_PREFIX = "message-username-"
+_CONTENT_ID_PREFIX = "message-content-"
 _TIMESTAMP_ID_PREFIX = "message-timestamp-"
 
 _POLL_INTERVAL_MS = 500
@@ -53,6 +54,16 @@ class ChannelSnapshot:
 
 	channel_id: str
 	messages: tuple[MessageEntry, ...]
+
+
+@dataclass(frozen=True)
+class _RawMessage:
+	"""One message list item as read, before authors are carried across a run."""
+
+	identity: MessageIdentity | None
+	author: str
+	text: str
+	composed: bool
 
 
 @dataclass
@@ -91,6 +102,7 @@ class AppModule(appModuleHandler.AppModule):
 		self._channelDocumentWindowHandle: Any = None
 		self._needsBaseline = True
 		self._lastDiscoveryState: str | None = None
+		self._lastPollError: str | None = None
 		log.info(f"DiscordMessages: loaded (PID {self.processID})")
 		self._schedulePoll()
 
@@ -113,8 +125,20 @@ class AppModule(appModuleHandler.AppModule):
 		self._pollTimer = None
 		if self._terminated:
 			return
-		self._uiaRead()
-		self._schedulePoll()
+		try:
+			self._uiaRead()
+		except Exception as e:
+			# Rescheduling must survive any failure. Without the finally, one escaped
+			# exception stops the timer for good and the add-on goes silent until
+			# NVDA restarts, with nothing to tell the user it has stopped.
+			kind = type(e).__name__
+			if kind != self._lastPollError:
+				self._lastPollError = kind
+				log.warning(f"DiscordMessages: poll failed ({kind})")
+		else:
+			self._lastPollError = None
+		finally:
+			self._schedulePoll()
 
 	def _uiaRead(self) -> None:
 		"""Read and process one foreground structural snapshot."""
@@ -127,7 +151,6 @@ class AppModule(appModuleHandler.AppModule):
 			is_foreground = bool(foreground and foreground.appModule is self)
 		except Exception:
 			is_foreground = False
-			foreground = None
 		if not is_foreground or not self._announceEnabled:
 			self._markBaselineRequired()
 			return
@@ -184,7 +207,7 @@ class AppModule(appModuleHandler.AppModule):
 			return ChannelSnapshot(channel_id, self._identifyMessages(raw_entries))
 		except Exception as e:
 			self._invalidateChannelDocument()
-			log.warning(f"DiscordMessages: snapshot read failed ({type(e).__name__})")
+			self._noteSnapshotFailure(type(e).__name__)
 			return None
 
 	def _noteDiscoveryState(self, state: str) -> None:
@@ -196,6 +219,17 @@ class AppModule(appModuleHandler.AppModule):
 		if state != self._lastDiscoveryState:
 			self._lastDiscoveryState = state
 			log.debug("DiscordMessages: discovery %s", state)
+
+	def _noteSnapshotFailure(self, kind: str) -> None:
+		"""Warn once per distinct failure rather than twice a second forever.
+
+		Shares the discovery-state gate, so a failure that clears and returns is
+		reported again instead of being suppressed for the session.
+		"""
+		state = f"error-{kind}"
+		if state != self._lastDiscoveryState:
+			self._lastDiscoveryState = state
+			log.warning(f"DiscordMessages: snapshot read failed ({kind})")
 
 	def _discoveryFailed(self, state: str) -> ChannelSnapshot | None:
 		"""Record why a structural snapshot was unavailable and yield no snapshot."""
@@ -260,16 +294,9 @@ class AppModule(appModuleHandler.AppModule):
 				return candidate
 		return None
 
-	def _hasAriaAncestor(
-		self,
-		walker: Any,
-		element: Any,
-		role: str,
-		*,
-		max_depth: int = 12,
-	) -> bool:
+	def _hasAriaAncestor(self, walker: Any, element: Any, role: str) -> bool:
 		ancestor = walker.GetParentElement(element)
-		for _ in range(max_depth):
+		for _ in range(self.MAX_ARTICLE_DEPTH):
 			if not ancestor:
 				return False
 			ancestor_role = self._getElementProperty(
@@ -286,10 +313,10 @@ class AppModule(appModuleHandler.AppModule):
 		self,
 		walker: Any,
 		message_list: Any,
-	) -> list[tuple[MessageIdentity | None, str]]:
+	) -> list[tuple[MessageIdentity | None, str, str]]:
 		"""Read recent message list items in document order with bounded walking."""
 		child = walker.GetLastChildElement(message_list)
-		reversed_entries: list[tuple[MessageIdentity | None, str, str]] = []
+		reversed_entries: list[_RawMessage] = []
 		iterations = 0
 		while (
 			child
@@ -303,33 +330,53 @@ class AppModule(appModuleHandler.AppModule):
 				"CurrentControlType",
 			)
 			if control_type == _UIA_ListItemControlTypeId:
-				author, text = self._messageParts(walker, child)
-				if text:
-					reversed_entries.append((self._runtimeIdentity(child), author, text))
+				raw = self._messageParts(walker, child)
+				if raw.text:
+					reversed_entries.append(
+						_RawMessage(
+							self._runtimeIdentity(child),
+							raw.author,
+							raw.text,
+							raw.composed,
+						)
+					)
 			child = walker.GetPreviousSiblingElement(child)
 		reversed_entries.reverse()
 		return self._attributeGroupedMessages(reversed_entries)
 
 	def _attributeGroupedMessages(
 		self,
-		entries: list[tuple[MessageIdentity | None, str, str]],
-	) -> list[tuple[MessageIdentity | None, str]]:
-		"""Prefix each message with its author, carrying it across grouped runs.
+		entries: list[_RawMessage],
+	) -> list[tuple[MessageIdentity | None, str, str]]:
+		"""Name each message, carrying an author across a grouped run.
 
 		Discord omits the header on consecutive messages from one author, so those
 		articles carry no author element at all. The author is whoever last posted,
 		which is exactly what Discord shows visually. A run whose first author sits
 		above the snapshot window stays unattributed rather than guessing.
+
+		An author found on a message always updates the run, even when that message
+		fell back to a raw Name. Dropping it there would leave the *next* grouped
+		message wearing the previous speaker's name, which is far worse than saying
+		nothing. Fallback text is never prefixed, because Discord's own summary
+		already opens with the author.
+
+		Returns (identity, fingerprint, spoken) per message. The fingerprint omits
+		the author prefix so that identity stays stable when the message that opened
+		a run scrolls out of the snapshot window.
 		"""
-		attributed: list[tuple[MessageIdentity | None, str]] = []
+		attributed: list[tuple[MessageIdentity | None, str, str]] = []
 		current_author = ""
-		for identity, author, text in entries:
-			if author:
-				current_author = author
-			attributed.append((identity, f"{current_author}, {text}" if current_author else text))
+		for entry in entries:
+			if entry.author:
+				current_author = entry.author
+			spoken = entry.text
+			if entry.composed and current_author:
+				spoken = f"{current_author}, {entry.text}"
+			attributed.append((entry.identity, entry.text, spoken))
 		return attributed
 
-	def _messageParts(self, walker: Any, element: Any) -> tuple[str, str]:
+	def _messageParts(self, walker: Any, element: Any) -> _RawMessage:
 		"""Return the author and spoken text for one message list item.
 
 		Neither the list item Name nor the article Name is usable directly: both
@@ -337,24 +384,28 @@ class AppModule(appModuleHandler.AppModule):
 		labels, embed chrome ("Remove all embeds", "Play", "Open Link") and a
 		duplicated absolute timestamp. Composing from the article's own labelled
 		parts drops all of that without inspecting any presentation text.
+
+		A message with no labelled parts - an image, sticker or file post - still
+		reports its author, so the grouped run that follows is attributed correctly.
 		"""
 		article = self._articleElement(walker, element)
+		author = ""
 		if article is not None:
 			author, parts = self._articleParts(walker, article)
 			if parts:
-				return author, ", ".join(parts)
+				return _RawMessage(None, author, ", ".join(parts), True)
 			fallback = self._getElementProperty(article, _UIA_NamePropertyId, "CurrentName")
 			if isinstance(fallback, str) and fallback:
-				return "", fallback
+				return _RawMessage(None, author, fallback, False)
 		text = self._getElementProperty(element, _UIA_NamePropertyId, "CurrentName")
 		if isinstance(text, str) and text:
-			return "", text
-		return "", self._lastNamedChild(walker, element)
+			return _RawMessage(None, author, text, False)
+		return _RawMessage(None, author, self._lastNamedChild(walker, element), False)
 
 	def _articleElement(self, walker: Any, element: Any) -> Any | None:
 		"""Return the article child Discord builds for one message list item."""
 		child = walker.GetFirstChildElement(element)
-		for _ in range(10):
+		for _ in range(self.MAX_ARTICLE_SIBLINGS):
 			if not child:
 				break
 			role = self._getElementProperty(child, _UIA_AriaRolePropertyId, "CurrentAriaRole")
@@ -378,7 +429,14 @@ class AppModule(appModuleHandler.AppModule):
 		self._scanArticle(walker, article, scan, 0)
 		return scan.author, scan.parts
 
-	def _scanArticle(self, walker: Any, element: Any, scan: _ArticleScan, depth: int) -> None:
+	def _scanArticle(
+		self,
+		walker: Any,
+		element: Any,
+		scan: _ArticleScan,
+		depth: int,
+		in_content: bool = False,
+	) -> None:
 		if not element or depth > self.MAX_ARTICLE_DEPTH or scan.budget <= 0:
 			return
 		scan.budget -= 1
@@ -395,12 +453,18 @@ class AppModule(appModuleHandler.AppModule):
 				if not scan.author:
 					scan.author = self._firstNamedDescendant(walker, element)
 				return
-
-		if self._getElementProperty(element, _UIA_IsOffscreenPropertyId, "CurrentIsOffscreen") is True:
-			return
+			if automation_id.startswith(_CONTENT_ID_PREFIX):
+				in_content = True
 
 		role = self._getElementProperty(element, _UIA_AriaRolePropertyId, "CurrentAriaRole")
 		if isinstance(role, str) and role.casefold() == "description":
+			# Hidden text is skipped only outside the message body. Discord duplicates
+			# the timestamp as a visually hidden long-form date that sits beside the
+			# body, so it must go. Inside the body the same marking means the text is
+			# merely scrolled out of view, and dropping it would silently truncate a
+			# long message with nothing to signal the loss.
+			if not in_content and self._isOffscreen(element):
+				return
 			name = self._getElementProperty(element, _UIA_NamePropertyId, "CurrentName")
 			if isinstance(name, str) and name.strip():
 				scan.parts.append(name.strip())
@@ -410,8 +474,18 @@ class AppModule(appModuleHandler.AppModule):
 		for _ in range(self.MAX_ARTICLE_SIBLINGS):
 			if not child:
 				return
-			self._scanArticle(walker, child, scan, depth + 1)
+			self._scanArticle(walker, child, scan, depth + 1, in_content)
 			child = walker.GetNextSiblingElement(child)
+
+	def _isOffscreen(self, element: Any) -> bool:
+		return (
+			self._getElementProperty(
+				element,
+				_UIA_IsOffscreenPropertyId,
+				"CurrentIsOffscreen",
+			)
+			is True
+		)
 
 	def _firstNamedDescendant(self, walker: Any, element: Any, depth: int = 0) -> str:
 		"""Return the first non-empty Name at or below an element."""
@@ -432,7 +506,7 @@ class AppModule(appModuleHandler.AppModule):
 
 	def _lastNamedChild(self, walker: Any, element: Any) -> str:
 		child = walker.GetLastChildElement(element)
-		for _ in range(20):
+		for _ in range(self.MAX_ARTICLE_SIBLINGS):
 			if not child:
 				break
 			text = self._getElementProperty(child, _UIA_NamePropertyId, "CurrentName")
@@ -476,7 +550,12 @@ class AppModule(appModuleHandler.AppModule):
 		try:
 			return element.GetCurrentPropertyValue(property_id)
 		except Exception:
-			return getattr(element, fallback_attribute, "")
+			# getattr only swallows AttributeError. A detached element raises COMError
+			# from the property getter itself, which would abort the whole snapshot
+			# and turn the next poll into a silent baseline.
+			with contextlib.suppress(Exception):
+				return getattr(element, fallback_attribute, "")
+			return ""
 
 	@staticmethod
 	def _runtimeIdentity(element: Any) -> MessageIdentity | None:
@@ -488,21 +567,26 @@ class AppModule(appModuleHandler.AppModule):
 
 	def _identifyMessages(
 		self,
-		raw_entries: list[tuple[MessageIdentity | None, str]],
+		raw_entries: list[tuple[MessageIdentity | None, str, str]],
 	) -> tuple[MessageEntry, ...]:
 		"""Prefer UIA runtime IDs; use conservative occurrence IDs when unavailable.
 
 		Exact duplicate replacements at the bounded-window edge are indistinguishable
 		without runtime IDs. Reusing their occurrence IDs avoids replaying old content.
+
+		Entries arrive as (identity, fingerprint, spoken). The fingerprint carries no
+		author prefix, so identity does not change when the message that opened a
+		grouped run scrolls out of the window and its continuations lose the prefix.
 		"""
 		occurrences: dict[str, int] = {}
 		messages: list[MessageEntry] = []
-		for runtime_id, text in raw_entries:
-			text = self._sanitizeText(text)
+		for runtime_id, fingerprint, spoken in raw_entries:
+			text = self._sanitizeText(spoken)
 			if not text:
 				continue
 			if runtime_id is None:
-				digest = hashlib.sha256(text.encode("utf-8")).hexdigest()
+				stable = self._sanitizeText(fingerprint) or text
+				digest = hashlib.sha256(stable.encode("utf-8")).hexdigest()
 				occurrence = occurrences.get(digest, 0)
 				occurrences[digest] = occurrence + 1
 				identity: MessageIdentity = ("text", digest, occurrence)
@@ -517,7 +601,9 @@ class AppModule(appModuleHandler.AppModule):
 	def _processSnapshot(self, snapshot: ChannelSnapshot) -> None:
 		"""Store snapshot and announce only ordered additions to active channel."""
 		previous = self._channelSnapshots.get(snapshot.channel_id)
-		is_baseline = self._needsBaseline or self._currentChannelId != snapshot.channel_id or previous is None
+		is_baseline = (
+			self._needsBaseline or self._currentChannelId != snapshot.channel_id or previous is None
+		)
 		self._rememberSnapshot(snapshot)
 		self._currentChannelId = snapshot.channel_id
 		self._needsBaseline = False
@@ -580,6 +666,9 @@ class AppModule(appModuleHandler.AppModule):
 			del self._channelSnapshots[oldest_channel]
 
 	def _presentMessages(self, messages: tuple[MessageEntry, ...]) -> None:
+		# Re-sanitizing is deliberate. _identifyMessages already does it for the
+		# polling path, but this is the single output gate: nothing reaches speech
+		# without passing a length bound and a control-character filter here.
 		texts = [self._sanitizeText(message.text) for message in messages]
 		texts = [text for text in texts if text]
 		if not texts:

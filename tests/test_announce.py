@@ -47,9 +47,9 @@ class TestSnapshotDiffing:
         ui_message().assert_called_once_with("alice: same")
 
     def test_fallback_identity_window_slide_does_not_reannounce_identical_messages(self, app_module):
-        raw_entries = [(None, "alice: same")] * app_module.MAX_SNAPSHOT_MESSAGES
+        raw_entries = [(None, "alice: same", "alice: same")] * app_module.MAX_SNAPSHOT_MESSAGES
         first = ChannelSnapshot("one", app_module._identifyMessages(raw_entries))
-        second_entries = [*raw_entries[1:], (None, "alice: same")]
+        second_entries = [*raw_entries[1:], (None, "alice: same", "alice: same")]
         second = ChannelSnapshot("one", app_module._identifyMessages(second_entries))
 
         app_module._processSnapshot(first)
@@ -101,11 +101,18 @@ class TestSnapshotDiffing:
         log.debug.assert_not_called()
 
     def test_fallback_overlap_announces_only_suffix_after_known_tail(self, app_module):
-        first = ChannelSnapshot("one", app_module._identifyMessages([(None, "existing"), (None, "tail")]))
+        first = ChannelSnapshot(
+            "one", app_module._identifyMessages([(None, "existing", "existing"), (None, "tail", "tail")])
+        )
         second = ChannelSnapshot(
             "one",
             app_module._identifyMessages(
-                [(None, "older history"), (None, "existing"), (None, "tail"), (None, "new suffix")]
+                [
+                    (None, "older history", "older history"),
+                    (None, "existing", "existing"),
+                    (None, "tail", "tail"),
+                    (None, "new suffix", "new suffix"),
+                ]
             ),
         )
 
@@ -115,12 +122,12 @@ class TestSnapshotDiffing:
         ui_message().assert_called_once_with("new suffix")
 
     def test_ambiguous_duplicate_window_recovers_silently_until_overlap_returns(self, app_module):
-        duplicates = [(None, "same")] * app_module.MAX_SNAPSHOT_MESSAGES
+        duplicates = [(None, "same", "same")] * app_module.MAX_SNAPSHOT_MESSAGES
         first = ChannelSnapshot("one", app_module._identifyMessages(duplicates))
         indistinguishable_replacement = ChannelSnapshot("one", app_module._identifyMessages(duplicates))
-        changed_window_entries = [*duplicates[1:], (None, "new tail")]
+        changed_window_entries = [*duplicates[1:], (None, "new tail", "new tail")]
         changed_window = ChannelSnapshot("one", app_module._identifyMessages(changed_window_entries))
-        later_entries = [*changed_window_entries, (None, "later")]
+        later_entries = [*changed_window_entries, (None, "later", "later")]
         later = ChannelSnapshot("one", app_module._identifyMessages(later_entries))
 
         app_module._processSnapshot(first)
