@@ -49,9 +49,46 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   changes, so a silent add-on can be diagnosed from the NVDA log. No Discord
   content is logged.
 
+- A body-less message - an image, sticker or file post - no longer causes the
+  messages after it to be announced under the wrong name. Its author is now
+  recorded even though it has no text to compose, so the grouped run that
+  follows is attributed correctly.
+
+- Polling can no longer stop for good. An unexpected error inside one poll left
+  the timer unscheduled, so the add-on went silent until NVDA restarted, with
+  nothing to indicate it had stopped.
+
+- A message detached by Discord's list virtualization mid-read no longer aborts
+  the whole snapshot. Aborting turned the following poll into a silent baseline,
+  so everything that arrived in between was never announced.
+
+- Long messages scrolled partly out of view are no longer truncated. Hidden text
+  is skipped only outside the message body, which still drops Discord's
+  duplicated long-form date without swallowing real content.
+
+- Repeated identical failures are logged once rather than twice a second.
+
 ### Security
 
 - `pip` 26.1.2 to 26.2.1, resolving PYSEC-2026-3721.
+
+- Workflows no longer persist credentials into the workspace
+  (`persist-credentials: false` on every checkout), and the release job no longer
+  restores a build cache, which closed a cache-poisoning path into published
+  signed artifacts.
+
+- Added zizmor, a GitHub Actions security scanner, to CI and the local suite.
+  actionlint checks workflow syntax; zizmor checks for workflow vulnerabilities,
+  and found both issues above.
+
+### Removed
+
+- Trivy. It scanned only `uv.lock`, which OSV-Scanner and pip-audit already
+  cover; its secret scanner duplicates Gitleaks; its misconfiguration scanner had
+  no infrastructure files to read; and it accounted for roughly 70% of the local
+  suite's runtime.
+
+- The unused `hypothesis` development dependency.
 
 ---
 

@@ -59,7 +59,7 @@ All gestures appear under **Discord Messages Reader** in NVDA's Input Gestures d
 
 ## Building From Source
 
-Requires Python 3.13.12, matching NVDA 2026.1, and uv.
+Requires Python 3.13, matching NVDA 2026.1, and uv.
 
 ```
 git clone https://github.com/blindndangerous/discord-messages-reader.git

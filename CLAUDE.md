@@ -12,7 +12,11 @@ tests/
   test_filter.py            - Content normalization and safety tests
   test_announce.py          - Snapshot diff and announcement tests
   test_uia.py               - Structural UIA snapshot tests
+  test_history.py           - Alt+1-0 history-reading tests
   test_smoke.py             - Lifecycle and event handler smoke tests
+  test_build.py             - Packaging and path-safety tests
+  test_compatibility.py     - PTB/Canary re-export tests
+  test_release_workflow.py  - Release workflow guard tests
 manifest.ini                - NVDA add-on manifest
 build.py                    - Creates dist/*.nvda-addon (ZIP)
 pyproject.toml              - Runs tests from tests/ directory and configures tooling
@@ -21,14 +25,25 @@ pyproject.toml              - Runs tests from tests/ directory and configures to
 ## Build and Test
 
 ```bash
+powershell -NoProfile -File scripts/check.ps1   # everything CI runs, locally
 python build.py             # produces dist/discord_messages_reader-X.X.X.nvda-addon
 uv run pytest               # full unit suite
 uv run ruff check .         # lint
 uv run mypy appModules/discord/  # type check
 ```
 
+`scripts/check.ps1` is the canonical pre-push gate: it runs every CI check that
+can run locally and reports a loud `SKIPPED` banner for any scanner that is not
+installed, because a skipped check is not a passed one. Install it as a blocking
+hook with `pre-commit install --hook-type pre-push`.
+
+Coverage is a ratchet. `fail_under` is currently 97 and must never be lowered;
+raise it when real coverage rises.
+
 Use Python 3.13, matching NVDA 2026.1. Install the locked environment with
-`uv sync --locked`.
+`uv sync --locked`. Tool versions are deliberately unpinned so we track latest;
+the only pins that stay are GitHub Action commit digests, which Renovate
+maintains for supply-chain reasons.
 
 ## GitHub Attribution
 
@@ -54,7 +69,23 @@ Then restart NVDA (Ctrl+Alt+N) to reload.
 - **UIA polling (500ms)** is the only automatic message-detection path.
 - **Structural discovery** selects the UIA list below Discord's `main` landmark
   and accepts only its `ListItem` children. Text heuristics must not determine
-  whether a control is a message.
+  whether a control is a message, nor which parts of a message are announced.
+- **Announcement composition** reads Discord's own automation IDs
+  (`message-username-`, `message-content-`, `message-timestamp-`) to select parts
+  structurally. These are identifiers, not presentation text, so they survive
+  locale changes and Discord restyling. Never announce a bare `Name` from the
+  list item or the article: both are Chromium concatenations of every descendant
+  and carry the header, a duplicated timestamp, reaction labels and the hover
+  toolbar. The timestamp subtree is dropped by ID; the long-form date Discord
+  duplicates for tooltips is dropped as offscreen. Embed and attachment *chrome*
+  ("Remove all embeds", "Play", "Image", "Open Link", audio transport controls)
+  is separated from *content* by whether an element carries a `description`
+  child - never by matching label text. Do not reintroduce text matching here.
+- **Grouped messages** carry no author element at all: Discord omits the header
+  on a run from one author and hoists the timestamp blocks to the top of the
+  article, so the two shapes differ structurally. The author of a run is carried
+  forward onto its continuations. A run whose author sits above the snapshot
+  window stays unattributed rather than guessing.
 - **Per-channel snapshots** use Discord channel identity and UIA runtime IDs.
   Content fingerprints are occurrence-aware fallbacks, not global dedup keys.
 - **Silent baselines** apply on startup, channel changes, foreground return,
