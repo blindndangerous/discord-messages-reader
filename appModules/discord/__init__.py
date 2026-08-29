@@ -31,7 +31,9 @@ _UIA_TreeScope_Descendants = 4
 # "message-<part>-<message id>". They are identifiers rather than presentation
 # text, so they hold across locales and across Discord's own restyling.
 _AUTHOR_ID_PREFIX = "message-username-"
-_CONTENT_ID_PREFIX = "message-content-"
+# The body a user typed, and the embeds and attachments hanging off it. Both are
+# message content; only the timestamp region sits outside them.
+_CONTENT_ID_PREFIXES = ("message-content-", "message-accessories-")
 _TIMESTAMP_ID_PREFIX = "message-timestamp-"
 
 _POLL_INTERVAL_MS = 500
@@ -453,16 +455,17 @@ class AppModule(appModuleHandler.AppModule):
 				if not scan.author:
 					scan.author = self._firstNamedDescendant(walker, element)
 				return
-			if automation_id.startswith(_CONTENT_ID_PREFIX):
+			if automation_id.startswith(_CONTENT_ID_PREFIXES):
 				in_content = True
 
 		role = self._getElementProperty(element, _UIA_AriaRolePropertyId, "CurrentAriaRole")
 		if isinstance(role, str) and role.casefold() == "description":
-			# Hidden text is skipped only outside the message body. Discord duplicates
-			# the timestamp as a visually hidden long-form date that sits beside the
-			# body, so it must go. Inside the body the same marking means the text is
-			# merely scrolled out of view, and dropping it would silently truncate a
-			# long message with nothing to signal the loss.
+			# Hidden text is skipped only outside Discord's labelled content regions.
+			# Inside them, offscreen means nothing useful: Chromium marks an entire
+			# message tree offscreen whenever the window is not the visible one, so
+			# trusting it there drops real content. Outside them it means what we
+			# want, because the only thing there is the visually hidden long-form
+			# date Discord duplicates for tooltips.
 			if not in_content and self._isOffscreen(element):
 				return
 			name = self._getElementProperty(element, _UIA_NamePropertyId, "CurrentName")

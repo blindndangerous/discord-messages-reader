@@ -629,15 +629,24 @@ def _described_link(text):
     )
 
 
-def youtube_embed(platform="YouTube", channel="wavywebsurf", title="Why This Mascot Punched"):
+def youtube_embed(
+    platform="YouTube",
+    channel="wavywebsurf",
+    title="Why This Mascot Punched",
+    mid="1",
+    offscreen=False,
+):
     """A link embed: content elements carry a description child, chrome does not."""
     return Element(
         aria_role="group",
         control_type=_GROUP,
+        automation_id=f"message-accessories-{mid}",
+        offscreen=offscreen,
         children=[
             Element(
                 aria_role="article",
                 control_type=_GROUP,
+                offscreen=offscreen,
                 children=[
                     Element(aria_role="button", control_type=_BUTTON, name="Remove all embeds"),
                     Element(
@@ -1180,3 +1189,91 @@ class TestDiscoveryDiagnostics:
 
         for call in self._log().debug.call_args_list:
             assert secret not in str(call)
+
+
+class TestBackgroundedWindow:
+    """Chromium marks the whole message tree offscreen when Discord is not visible.
+
+    Every element then reports IsOffscreen, so offscreen can only be trusted
+    outside Discord's labelled content regions - where the sole occupant is the
+    duplicated long-form date.
+    """
+
+    def test_embed_content_survives_a_backgrounded_window(self, app_module):
+        """The bug this pins: embeds vanished whenever Discord was not in front."""
+        items = [
+            discord_message(
+                mid="1",
+                author="blindndangerous",
+                body="https://youtu.be/x",
+                embed=youtube_embed(mid="1", offscreen=True),
+            )
+        ]
+
+        (text,) = texts_for(app_module, items)
+
+        assert "YouTube" in text
+        assert "wavywebsurf" in text
+        assert "Why This Mascot Punched" in text
+
+    def test_embed_chrome_still_dropped_when_offscreen(self, app_module):
+        items = [
+            discord_message(
+                mid="1",
+                author="blindndangerous",
+                body="https://youtu.be/x",
+                embed=youtube_embed(mid="1", offscreen=True),
+            )
+        ]
+
+        (text,) = texts_for(app_module, items)
+
+        for chrome in ("Remove all embeds", "Play", "Open Link", "Image"):
+            assert chrome not in text
+
+    def test_hidden_long_form_date_is_still_dropped_when_all_is_offscreen(self, app_module):
+        """The one thing offscreen must still catch, even in a backgrounded window."""
+        item = discord_message(
+            mid="1",
+            author="Bryn",
+            body="hello",
+            long_form="Friday, August 28, 2026 11:53 PM",
+        )
+        for element in (item, item.children[0]):
+            element.properties[_IS_OFFSCREEN] = True
+
+        (text,) = texts_for(app_module, [item])
+
+        assert "Friday" not in text
+        assert text == "Bryn, hello"
+
+    def test_attachment_accessories_are_announced(self, app_module):
+        """Attachments share the accessories container with embeds."""
+        accessories = Element(
+            aria_role="group",
+            control_type=_GROUP,
+            automation_id="message-accessories-1",
+            offscreen=True,
+            children=[
+                Element(aria_role="button", control_type=_BUTTON, name="Download"),
+                Element(
+                    aria_role="group",
+                    control_type=_GROUP,
+                    children=[
+                        Element(
+                            aria_role="description",
+                            control_type=_HEADING,
+                            name="voice-message.ogg",
+                        )
+                    ],
+                ),
+            ],
+        )
+        items = [
+            discord_message(mid="1", author="Bryn", body="", embed=accessories),
+        ]
+
+        (text,) = texts_for(app_module, items)
+
+        assert "voice-message.ogg" in text
+        assert "Download" not in text
