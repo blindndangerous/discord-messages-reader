@@ -6,6 +6,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+---
+
+## [2.1.0] - 2026-08-29
+
 ### Fixed
 
 - Incoming messages are announced again. Discord now appends a message id to the
@@ -14,18 +18,40 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   silently established a baseline instead of announcing. Channel identity now
   ignores the trailing message id, so it also stays stable as that id changes.
 
-- Announcements no longer read reaction shortcodes, "Click to react" labels, the
-  hover toolbar (`Add Reaction`, `Edit`, `Forward`, `More`) or a duplicated
-  absolute timestamp. Message text now comes from the `article` element Discord
-  builds for screen readers rather than the concatenated list item name, which
-  also restores the author on grouped consecutive messages.
+- Grouped consecutive messages name their author again. Discord omits the header
+  on a run of messages from one person, so those entries carried no author at
+  all. The author of a run is now carried forward onto its continuations, which
+  is what Discord shows visually.
 
 ### Changed
+
+- Announcements are composed from Discord's own labelled message parts instead
+  of a concatenation of every descendant. Both the list item name and the
+  article name run the header, body, reactions and toolbar together; the parts
+  are identified structurally by Discord's `message-username-`,
+  `message-content-` and `message-timestamp-` automation IDs, so no presentation
+  text is inspected.
+
+- Announcements no longer read the timestamp. Both the visible short form and
+  the hidden long form (`Friday, August 28, 2026 11:53 PM`) are dropped.
+
+- Announcements no longer read embed and attachment chrome — `Remove all
+  embeds`, `Play`, `Image`, `Open Link`, and the audio player's transport
+  controls. Embed *content* is kept: a shared link still announces its platform,
+  channel and title. Chrome is separated from content structurally, by whether
+  an element carries a `description` child.
+
+- Reaction shortcodes, "Click to react" labels and the hover toolbar
+  (`Add Reaction`, `Edit`, `Forward`, `More`) are no longer announced.
 
 - Structural discovery failures log a debug reason (`no-uia-root`,
   `no-documents`, `no-channel-document`, `no-message-list`) when the state
   changes, so a silent add-on can be diagnosed from the NVDA log. No Discord
   content is logged.
+
+### Security
+
+- `pip` 26.1.2 to 26.2.1, resolving PYSEC-2026-3721.
 
 ---
 
