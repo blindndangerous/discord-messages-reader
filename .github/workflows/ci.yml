@@ -18,6 +18,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
 
       - name: Install uv
         uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
@@ -30,7 +32,7 @@ jobs:
           python-version: "3.13"
 
       - name: Install dependencies
-        run: uv sync --locked --all-extras
+        run: uv sync --locked
 
       - name: Ruff — lint
         run: uv run --locked ruff check .
@@ -46,6 +48,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
 
       - name: Install uv
         uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
@@ -58,7 +62,7 @@ jobs:
           python-version: "3.13"
 
       - name: Install dependencies
-        run: uv sync --locked --all-extras
+        run: uv sync --locked
 
       - name: Bandit — security scan
         run: uv run --locked bandit -r appModules/ -c pyproject.toml
@@ -71,6 +75,8 @@ jobs:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
 
       - name: Install uv
         uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
@@ -83,7 +89,7 @@ jobs:
           python-version: "3.13"
 
       - name: Install dependencies
-        run: uv sync --locked --all-extras
+        run: uv sync --locked
 
       - name: Pytest — test suite with coverage
         run: uv run --locked pytest --tb=short
