@@ -33,6 +33,14 @@ repos:
     hooks:
       - id: actionlint
 
+  # GitHub Actions security scanner. actionlint checks syntax; zizmor checks
+  # for workflow vulnerabilities such as credential persistence and cache
+  # poisoning, which actionlint does not look for.
+  - repo: https://github.com/zizmorcore/zizmor-pre-commit
+    rev: v1.29.0
+    hooks:
+      - id: zizmor
+
   - repo: https://github.com/astral-sh/ruff-pre-commit
     rev: v0.15.10
     hooks:

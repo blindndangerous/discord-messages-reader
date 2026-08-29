@@ -4,7 +4,7 @@ Use this setup for local development.
 
 ## Prerequisites
 
-- Python 3.13.12
+- Python 3.13
 - uv
 - NVDA 2026.1.1, only needed for live Discord testing
 - Git
@@ -33,16 +33,15 @@ The test suite runs without NVDA installed. It uses stubs for the NVDA modules. 
 powershell -NoProfile -File scripts/check.ps1
 ```
 
-It runs ruff (lint and format check), mypy, pytest, bandit, pip-audit, osv-scanner, and a Trivy filesystem scan. Every check runs even if an earlier one fails, so one run shows everything that is broken. A summary table is printed at the end and the script exits non-zero if any check failed. The whole suite takes about 30 seconds.
+It runs ruff (lint and format check), mypy, pytest, bandit, pip-audit, zizmor, and osv-scanner. Every check runs even if an earlier one fails, so one run shows everything that is broken. A summary table is printed at the end and the script exits non-zero if any check failed. The whole suite takes about 30 seconds.
 
-osv-scanner and Trivy are external tools and are not installed by `uv sync`. Install them with:
+osv-scanner is an external tool and is not installed by `uv sync`. Install it with:
 
 ```
 winget install Google.OSVScanner
-winget install AquaSecurity.Trivy
 ```
 
-No tool versions are pinned. The script uses whatever `uv`, `osv-scanner`, and `trivy` are on your PATH. If a scanner is missing, its check is reported as `SKIPPED` with a loud banner rather than passing silently, and the rest of the suite still runs.
+No tool versions are pinned. The script uses whatever `uv` and `osv-scanner` are on your PATH. If a scanner is missing, its check is reported as `SKIPPED` with a loud banner rather than passing silently, and the rest of the suite still runs.
 
 ## Git hooks
 
@@ -69,6 +68,9 @@ tests/
   test_uia.py               - structural UIA snapshot tests
   test_history.py           - Alt+1-0 history-reading tests
   test_smoke.py             - Lifecycle and event handler smoke tests
+  test_build.py             - packaging and path-safety tests
+  test_compatibility.py     - PTB/Canary re-export tests
+  test_release_workflow.py  - release workflow guard tests
 manifest.ini                - NVDA add-on manifest
 build.py                    - Creates dist/*.nvda-addon
 pyproject.toml              - Test, lint, type-check, and dependency config

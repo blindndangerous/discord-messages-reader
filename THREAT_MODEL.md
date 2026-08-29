@@ -36,7 +36,7 @@ Runtime code does not spawn subprocesses or write files.
 ## Dependencies
 
 - `pyproject.toml` and `uv.lock` are committed; CI installs with `--locked`.
-- Bandit, pip-audit, OSV-Scanner, Trivy, and Gitleaks run in automation.
+- Bandit, pip-audit, OSV-Scanner, zizmor, and Gitleaks run in automation.
 - Renovate is configured for Python, pre-commit, and GitHub Actions dependencies.
 - GitHub Actions use immutable commit pins.
 
