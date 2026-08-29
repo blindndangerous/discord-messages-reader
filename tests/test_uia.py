@@ -93,8 +93,18 @@ class RawViewWalker:
         return element.parent
 
     @staticmethod
+    def GetFirstChildElement(element):
+        return element.children[0] if element.children else None
+
+    @staticmethod
     def GetLastChildElement(element):
         return element.children[-1] if element.children else None
+
+    @staticmethod
+    def GetNextSiblingElement(element):
+        siblings = element.parent.children
+        index = siblings.index(element)
+        return siblings[index + 1] if index + 1 < len(siblings) else None
 
     @staticmethod
     def GetPreviousSiblingElement(element):
@@ -160,6 +170,60 @@ class TestStructuralSnapshots:
             ("runtime", 2, 2),
         ]
         document.FindAll.assert_not_called()
+
+    def test_prefers_article_summary_over_noisy_list_item_name(self, app_module):
+        """The list item Name concatenates reactions and the hover toolbar."""
+        article = Element(
+            name="Bryn , what's this, AAC music? , 11:53 PM",
+            aria_role="article",
+            control_type=50026,
+        )
+        item = Element(
+            name=(
+                "Bryn11:53 PMFriday, August 28, 2026 11:53 PMwhat's this, AAC music?"
+                ":pleading_face:Click to react:rofl:Click to reactAdd ReactionEditForwardMore"
+            ),
+            aria_role="listitem",
+            runtime_id=(2, 1),
+            children=[article],
+        )
+        root, _ = make_tree("https://discord.com/channels/1/2", [item])
+        _uia, foreground = install_uia(root)
+
+        snapshot = app_module._getSnapshotViaUIA(foreground)
+
+        assert [message.text for message in snapshot.messages] == [
+            "Bryn , what's this, AAC music? , 11:53 PM"
+        ]
+
+    def test_article_summary_restores_author_on_grouped_messages(self, app_module):
+        """Consecutive messages from one author omit the header from the item Name."""
+        article = Element(
+            name="acerbt , this is the modern voice demo. , 11:52 PM",
+            aria_role="article",
+            control_type=50026,
+        )
+        item = Element(
+            name="11:52 PMTuesday, August 25, 2026 11:52 PMthis is the modern voice demo.",
+            aria_role="listitem",
+            runtime_id=(2, 1),
+            children=[article],
+        )
+        root, _ = make_tree("https://discord.com/channels/1/2", [item])
+        _uia, foreground = install_uia(root)
+
+        snapshot = app_module._getSnapshotViaUIA(foreground)
+
+        assert snapshot.messages[0].text.startswith("acerbt")
+
+    def test_falls_back_to_list_item_name_without_article_child(self, app_module):
+        item = Element(name="plain message", aria_role="listitem", runtime_id=(2, 1))
+        root, _ = make_tree("https://discord.com/channels/1/2", [item])
+        _uia, foreground = install_uia(root)
+
+        snapshot = app_module._getSnapshotViaUIA(foreground)
+
+        assert [message.text for message in snapshot.messages] == ["plain message"]
 
     def test_ignores_lists_outside_main_landmark(self, app_module):
         root, _document = make_tree(
@@ -356,12 +420,49 @@ class TestStructuralSnapshots:
     @pytest.mark.parametrize(
         "url",
         [
+            "https://discord.com/channels/@me/222222222222222222/333333333333333333",
+            "https://discord.com/channels/1/2/3",
+            "https://ptb.discord.com/channels/1/2/3",
+        ],
+    )
+    def test_accepts_channel_urls_with_trailing_message_id(self, app_module, url):
+        """Discord appends a message id when a message is focused or deep-linked."""
+        root, _ = make_tree(url, [])
+        _uia, foreground = install_uia(root)
+
+        snapshot = app_module._getSnapshotViaUIA(foreground)
+
+        assert snapshot is not None
+        assert snapshot.channel_id == url.rsplit("/", 1)[0]
+
+    def test_trailing_message_id_does_not_change_channel_identity(self, app_module):
+        """A changing message id must not read as a channel change and re-baseline."""
+        first = Element(name="alice: hi", aria_role="message", runtime_id=(2, 1))
+        root, document = make_tree("https://discord.com/channels/1/2/100", [first])
+        _uia, foreground = install_uia(root)
+        foreground.appModule = app_module
+        sys.modules["api"].getForegroundObject.return_value = foreground
+
+        app_module._uiaRead()
+        sys.modules["ui"].message.assert_not_called()
+
+        document.properties[_VALUE] = "https://discord.com/channels/1/2/101"
+        root.messages.append(Element(name="bob: new", aria_role="message", runtime_id=(2, 2)))
+        app_module._uiaRead()
+
+        sys.modules["ui"].message.assert_called_once_with("bob: new")
+
+    @pytest.mark.parametrize(
+        "url",
+        [
             "http://discord.com/channels/1/2",
             "https://discord.com.evil.test/channels/1/2",
             "https://discord.com/not-channels/1/2",
             "https://discord.com//channels/1/2",
             "https://discord.com/channels/only-one-id",
             "https://discord.com:443/channels/1/2",
+            "https://discord.com/channels/1/2/not-a-message-id",
+            "https://discord.com/channels/1/2/3/4",
         ],
     )
     def test_rejects_noncanonical_discord_channel_urls(self, app_module, url):

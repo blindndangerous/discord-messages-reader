@@ -71,6 +71,7 @@ class AppModule(appModuleHandler.AppModule):
 		self._messageList: Any = None
 		self._channelDocumentWindowHandle: Any = None
 		self._needsBaseline = True
+		self._lastDiscoveryState: str | None = None
 		log.info(f"DiscordMessages: loaded (PID {self.processID})")
 		self._schedulePoll()
 
@@ -141,30 +142,46 @@ class AppModule(appModuleHandler.AppModule):
 			if document is None or root is None:
 				root = uia.ElementFromHandle(window_handle)
 				if not root:
-					return None
+					return self._discoveryFailed("no-uia-root")
 				document_condition = uia.CreatePropertyCondition(
 					_UIA_ControlTypePropertyId,
 					_UIA_DocumentControlTypeId,
 				)
 				documents = root.FindAll(_UIA_TreeScope_Descendants, document_condition)
 				if not documents:
-					return None
+					return self._discoveryFailed("no-documents")
 				document, channel_id = self._findChannelDocument(documents)
 				self._channelRoot = root if document is not None else None
 				self._channelDocument = document
 				self._channelDocumentWindowHandle = window_handle if document is not None else None
 			if document is None or channel_id is None:
-				return None
+				return self._discoveryFailed("no-channel-document")
 
 			message_list = self._getMessageList(uia, root)
 			if message_list is None:
-				return None
+				return self._discoveryFailed("no-message-list")
 			raw_entries = self._readMessageEntries(uia.RawViewWalker, message_list)
+			self._noteDiscoveryState("ok")
 			return ChannelSnapshot(channel_id, self._identifyMessages(raw_entries))
 		except Exception as e:
 			self._invalidateChannelDocument()
 			log.warning(f"DiscordMessages: snapshot read failed ({type(e).__name__})")
 			return None
+
+	def _noteDiscoveryState(self, state: str) -> None:
+		"""Log structural discovery state only when it changes.
+
+		Polling runs twice a second, so unchanged states must stay silent. The
+		state name is a fixed label; no Discord content is ever logged.
+		"""
+		if state != self._lastDiscoveryState:
+			self._lastDiscoveryState = state
+			log.debug("DiscordMessages: discovery %s", state)
+
+	def _discoveryFailed(self, state: str) -> ChannelSnapshot | None:
+		"""Record why a structural snapshot was unavailable and yield no snapshot."""
+		self._noteDiscoveryState(state)
+		return None
 
 	def _invalidateChannelDocument(self) -> None:
 		self._channelRoot = None
@@ -267,7 +284,9 @@ class AppModule(appModuleHandler.AppModule):
 				"CurrentControlType",
 			)
 			if control_type == _UIA_ListItemControlTypeId:
-				text = self._getElementProperty(child, _UIA_NamePropertyId, "CurrentName")
+				text = self._articleText(walker, child)
+				if not text:
+					text = self._getElementProperty(child, _UIA_NamePropertyId, "CurrentName")
 				if not isinstance(text, str) or not text:
 					text = self._lastNamedChild(walker, child)
 				if text:
@@ -275,6 +294,26 @@ class AppModule(appModuleHandler.AppModule):
 			child = walker.GetPreviousSiblingElement(child)
 		reversed_entries.reverse()
 		return reversed_entries
+
+	def _articleText(self, walker: Any, element: Any) -> str:
+		"""Return Discord's own accessible summary for one message list item.
+
+		The list item Name concatenates the header, a duplicated absolute
+		timestamp, the body, every reaction shortcode with its "Click to react"
+		label, and the hover toolbar. The article child carries the summary
+		Discord builds for screen readers instead, and it still names the author
+		on grouped messages where the list item Name omits it.
+		"""
+		child = walker.GetFirstChildElement(element)
+		for _ in range(10):
+			if not child:
+				break
+			role = self._getElementProperty(child, _UIA_AriaRolePropertyId, "CurrentAriaRole")
+			if isinstance(role, str) and role.casefold() == "article":
+				text = self._getElementProperty(child, _UIA_NamePropertyId, "CurrentName")
+				return text if isinstance(text, str) else ""
+			child = walker.GetNextSiblingElement(child)
+		return ""
 
 	def _lastNamedChild(self, walker: Any, element: Any) -> str:
 		child = walker.GetLastChildElement(element)
@@ -304,11 +343,15 @@ class AppModule(appModuleHandler.AppModule):
 			return None
 		path = parsed.path[:-1] if parsed.path.endswith("/") else parsed.path
 		path_parts = path.split("/")
+		# Discord appends a message id to the channel URL when a message is
+		# focused or deep-linked. It is not part of channel identity: including
+		# it would make every new message look like a channel change.
 		if (
-			len(path_parts) != 4
+			len(path_parts) not in {4, 5}
 			or path_parts[:2] != ["", "channels"]
 			or (path_parts[2] != "@me" and not path_parts[2].isdigit())
 			or not path_parts[3].isdigit()
+			or (len(path_parts) == 5 and not path_parts[4].isdigit())
 		):
 			return None
 		return f"https://{host}/channels/{path_parts[2]}/{path_parts[3]}"

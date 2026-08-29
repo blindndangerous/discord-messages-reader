@@ -6,6 +6,27 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Fixed
+
+- Incoming messages are announced again. Discord now appends a message id to the
+  channel URL (`/channels/<guild>/<channel>/<message>`), which no longer matched
+  the expected channel URL shape, so every poll found no channel document and
+  silently established a baseline instead of announcing. Channel identity now
+  ignores the trailing message id, so it also stays stable as that id changes.
+
+- Announcements no longer read reaction shortcodes, "Click to react" labels, the
+  hover toolbar (`Add Reaction`, `Edit`, `Forward`, `More`) or a duplicated
+  absolute timestamp. Message text now comes from the `article` element Discord
+  builds for screen readers rather than the concatenated list item name, which
+  also restores the author on grouped consecutive messages.
+
+### Changed
+
+- Structural discovery failures log a debug reason (`no-uia-root`,
+  `no-documents`, `no-channel-document`, `no-message-list`) when the state
+  changes, so a silent add-on can be diagnosed from the NVDA log. No Discord
+  content is logged.
+
 ---
 
 ## [2.0.0] - 2026-08-02
