@@ -5,7 +5,7 @@ from __future__ import annotations
 import contextlib
 import hashlib
 import unicodedata
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 from urllib.parse import urlsplit
 
@@ -18,12 +18,20 @@ from logHandler import log
 # UI Automation constants from UIAutomationClient.h.
 _UIA_ControlTypePropertyId = 30003
 _UIA_NamePropertyId = 30005
+_UIA_AutomationIdPropertyId = 30011
+_UIA_IsOffscreenPropertyId = 30022
 _UIA_ValueValuePropertyId = 30045
 _UIA_AriaRolePropertyId = 30101
 _UIA_DocumentControlTypeId = 50030
 _UIA_ListControlTypeId = 50008
 _UIA_ListItemControlTypeId = 50007
 _UIA_TreeScope_Descendants = 4
+
+# Discord labels the parts of a message with stable automation IDs of the form
+# "message-<part>-<message id>". They are identifiers rather than presentation
+# text, so they hold across locales and across Discord's own restyling.
+_AUTHOR_ID_PREFIX = "message-username-"
+_TIMESTAMP_ID_PREFIX = "message-timestamp-"
 
 _POLL_INTERVAL_MS = 500
 
@@ -47,6 +55,15 @@ class ChannelSnapshot:
 	messages: tuple[MessageEntry, ...]
 
 
+@dataclass
+class _ArticleScan:
+	"""Mutable accumulator for one bounded walk of a message article subtree."""
+
+	author: str = ""
+	parts: list[str] = field(default_factory=list)
+	budget: int = 400
+
+
 class AppModule(appModuleHandler.AppModule):
 	"""Poll Discord's active channel and present new messages once."""
 
@@ -57,6 +74,8 @@ class AppModule(appModuleHandler.AppModule):
 	MAX_BURST_MESSAGES = 10
 	MAX_MESSAGE_CHARS = 500
 	MAX_ANNOUNCEMENT_CHARS = 1000
+	MAX_ARTICLE_DEPTH = 12
+	MAX_ARTICLE_SIBLINGS = 30
 
 	def __init__(self, *args: Any, **kwargs: Any) -> None:
 		super().__init__(*args, **kwargs)
@@ -270,7 +289,7 @@ class AppModule(appModuleHandler.AppModule):
 	) -> list[tuple[MessageIdentity | None, str]]:
 		"""Read recent message list items in document order with bounded walking."""
 		child = walker.GetLastChildElement(message_list)
-		reversed_entries: list[tuple[MessageIdentity | None, str]] = []
+		reversed_entries: list[tuple[MessageIdentity | None, str, str]] = []
 		iterations = 0
 		while (
 			child
@@ -284,34 +303,130 @@ class AppModule(appModuleHandler.AppModule):
 				"CurrentControlType",
 			)
 			if control_type == _UIA_ListItemControlTypeId:
-				text = self._articleText(walker, child)
-				if not text:
-					text = self._getElementProperty(child, _UIA_NamePropertyId, "CurrentName")
-				if not isinstance(text, str) or not text:
-					text = self._lastNamedChild(walker, child)
+				author, text = self._messageParts(walker, child)
 				if text:
-					reversed_entries.append((self._runtimeIdentity(child), text))
+					reversed_entries.append((self._runtimeIdentity(child), author, text))
 			child = walker.GetPreviousSiblingElement(child)
 		reversed_entries.reverse()
-		return reversed_entries
+		return self._attributeGroupedMessages(reversed_entries)
 
-	def _articleText(self, walker: Any, element: Any) -> str:
-		"""Return Discord's own accessible summary for one message list item.
+	def _attributeGroupedMessages(
+		self,
+		entries: list[tuple[MessageIdentity | None, str, str]],
+	) -> list[tuple[MessageIdentity | None, str]]:
+		"""Prefix each message with its author, carrying it across grouped runs.
 
-		The list item Name concatenates the header, a duplicated absolute
-		timestamp, the body, every reaction shortcode with its "Click to react"
-		label, and the hover toolbar. The article child carries the summary
-		Discord builds for screen readers instead, and it still names the author
-		on grouped messages where the list item Name omits it.
+		Discord omits the header on consecutive messages from one author, so those
+		articles carry no author element at all. The author is whoever last posted,
+		which is exactly what Discord shows visually. A run whose first author sits
+		above the snapshot window stays unattributed rather than guessing.
 		"""
+		attributed: list[tuple[MessageIdentity | None, str]] = []
+		current_author = ""
+		for identity, author, text in entries:
+			if author:
+				current_author = author
+			attributed.append((identity, f"{current_author}, {text}" if current_author else text))
+		return attributed
+
+	def _messageParts(self, walker: Any, element: Any) -> tuple[str, str]:
+		"""Return the author and spoken text for one message list item.
+
+		Neither the list item Name nor the article Name is usable directly: both
+		concatenate every descendant, so they carry the hover toolbar, reaction
+		labels, embed chrome ("Remove all embeds", "Play", "Open Link") and a
+		duplicated absolute timestamp. Composing from the article's own labelled
+		parts drops all of that without inspecting any presentation text.
+		"""
+		article = self._articleElement(walker, element)
+		if article is not None:
+			author, parts = self._articleParts(walker, article)
+			if parts:
+				return author, ", ".join(parts)
+			fallback = self._getElementProperty(article, _UIA_NamePropertyId, "CurrentName")
+			if isinstance(fallback, str) and fallback:
+				return "", fallback
+		text = self._getElementProperty(element, _UIA_NamePropertyId, "CurrentName")
+		if isinstance(text, str) and text:
+			return "", text
+		return "", self._lastNamedChild(walker, element)
+
+	def _articleElement(self, walker: Any, element: Any) -> Any | None:
+		"""Return the article child Discord builds for one message list item."""
 		child = walker.GetFirstChildElement(element)
 		for _ in range(10):
 			if not child:
 				break
 			role = self._getElementProperty(child, _UIA_AriaRolePropertyId, "CurrentAriaRole")
 			if isinstance(role, str) and role.casefold() == "article":
-				text = self._getElementProperty(child, _UIA_NamePropertyId, "CurrentName")
-				return text if isinstance(text, str) else ""
+				return child
+			child = walker.GetNextSiblingElement(child)
+		return None
+
+	def _articleParts(self, walker: Any, article: Any) -> tuple[str, list[str]]:
+		"""Walk one article subtree, returning its author and its spoken fragments.
+
+		Three structural rules do all the work, none of them reading presentation
+		text. The timestamp subtree is skipped by automation ID. The long-form date
+		Discord duplicates for tooltips is marked offscreen, so it is skipped as
+		hidden. Everything spoken comes from `description` elements, which is what
+		separates content from chrome: the embed title, channel and body text each
+		carry one, while "Remove all embeds", "Play", "Image" and "Open Link" are
+		bare buttons and images that carry none.
+		"""
+		scan = _ArticleScan()
+		self._scanArticle(walker, article, scan, 0)
+		return scan.author, scan.parts
+
+	def _scanArticle(self, walker: Any, element: Any, scan: _ArticleScan, depth: int) -> None:
+		if not element or depth > self.MAX_ARTICLE_DEPTH or scan.budget <= 0:
+			return
+		scan.budget -= 1
+
+		automation_id = self._getElementProperty(
+			element,
+			_UIA_AutomationIdPropertyId,
+			"CurrentAutomationId",
+		)
+		if isinstance(automation_id, str):
+			if automation_id.startswith(_TIMESTAMP_ID_PREFIX):
+				return
+			if automation_id.startswith(_AUTHOR_ID_PREFIX):
+				if not scan.author:
+					scan.author = self._firstNamedDescendant(walker, element)
+				return
+
+		if self._getElementProperty(element, _UIA_IsOffscreenPropertyId, "CurrentIsOffscreen") is True:
+			return
+
+		role = self._getElementProperty(element, _UIA_AriaRolePropertyId, "CurrentAriaRole")
+		if isinstance(role, str) and role.casefold() == "description":
+			name = self._getElementProperty(element, _UIA_NamePropertyId, "CurrentName")
+			if isinstance(name, str) and name.strip():
+				scan.parts.append(name.strip())
+			return
+
+		child = walker.GetFirstChildElement(element)
+		for _ in range(self.MAX_ARTICLE_SIBLINGS):
+			if not child:
+				return
+			self._scanArticle(walker, child, scan, depth + 1)
+			child = walker.GetNextSiblingElement(child)
+
+	def _firstNamedDescendant(self, walker: Any, element: Any, depth: int = 0) -> str:
+		"""Return the first non-empty Name at or below an element."""
+		if not element or depth > self.MAX_ARTICLE_DEPTH:
+			return ""
+		name = self._getElementProperty(element, _UIA_NamePropertyId, "CurrentName")
+		if isinstance(name, str) and name.strip():
+			return name.strip()
+		child = walker.GetFirstChildElement(element)
+		for _ in range(self.MAX_ARTICLE_SIBLINGS):
+			if not child:
+				break
+			found = self._firstNamedDescendant(walker, child, depth + 1)
+			if found:
+				return found
 			child = walker.GetNextSiblingElement(child)
 		return ""
 

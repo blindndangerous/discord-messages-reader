@@ -12,6 +12,14 @@ _LIST = 50008
 _LIST_ITEM = 50007
 _VALUE = 30045
 _ARIA_ROLE = 30101
+_AUTOMATION_ID = 30011
+_IS_OFFSCREEN = 30022
+
+_GROUP = 50026
+_HEADING = 50020
+_BUTTON = 50000
+_LINK = 50005
+_IMAGE = 50006
 
 
 class ElementArray:
@@ -57,12 +65,16 @@ class Element:
         runtime_id=None,
         control_type=_LIST_ITEM,
         children=None,
+        automation_id="",
+        offscreen=False,
     ):
         self.properties = {
             _NAME: name,
             _VALUE: value,
             _ARIA_ROLE: aria_role,
             _CONTROL_TYPE: control_type,
+            _AUTOMATION_ID: automation_id,
+            _IS_OFFSCREEN: offscreen,
         }
         self.runtime_id = runtime_id
         self.documents = []
@@ -192,9 +204,7 @@ class TestStructuralSnapshots:
 
         snapshot = app_module._getSnapshotViaUIA(foreground)
 
-        assert [message.text for message in snapshot.messages] == [
-            "Bryn , what's this, AAC music? , 11:53 PM"
-        ]
+        assert [message.text for message in snapshot.messages] == ["Bryn , what's this, AAC music? , 11:53 PM"]
 
     def test_article_summary_restores_author_on_grouped_messages(self, app_module):
         """Consecutive messages from one author omit the header from the item Name."""
@@ -564,3 +574,423 @@ class TestStructuralSnapshots:
         sys.modules["UIAHandler"].handler.clientObject = None
 
         assert app_module._getSnapshotViaUIA(MagicMock(windowHandle=1)) is None
+
+
+# ---------------------------------------------------------------------------
+# Builders mirroring the real Discord UIA shapes captured from a live client.
+# ---------------------------------------------------------------------------
+
+
+def _timestamp_blocks(mid, short, long_form):
+    """Discord renders the clock twice: a visible short form and a hidden long form."""
+    return [
+        Element(
+            aria_role="group",
+            control_type=_GROUP,
+            children=[
+                Element(
+                    aria_role="time",
+                    control_type=_HEADING,
+                    automation_id=f"message-timestamp-{mid}",
+                    children=[Element(aria_role="description", control_type=_HEADING, name=short)],
+                )
+            ],
+        ),
+        Element(
+            aria_role="group",
+            control_type=_GROUP,
+            children=[
+                Element(
+                    aria_role="description",
+                    control_type=_HEADING,
+                    name=long_form,
+                    offscreen=True,
+                )
+            ],
+        ),
+    ]
+
+
+def _content_block(mid, body_children):
+    return Element(
+        aria_role="group",
+        control_type=_GROUP,
+        automation_id=f"message-content-{mid}",
+        children=body_children,
+    )
+
+
+def _described_link(text):
+    return Element(
+        aria_role="link",
+        control_type=_LINK,
+        name=text,
+        children=[Element(aria_role="description", control_type=_HEADING, name=text)],
+    )
+
+
+def youtube_embed(platform="YouTube", channel="wavywebsurf", title="Why This Mascot Punched"):
+    """A link embed: content elements carry a description child, chrome does not."""
+    return Element(
+        aria_role="group",
+        control_type=_GROUP,
+        children=[
+            Element(
+                aria_role="article",
+                control_type=_GROUP,
+                children=[
+                    Element(aria_role="button", control_type=_BUTTON, name="Remove all embeds"),
+                    Element(
+                        aria_role="group",
+                        control_type=_GROUP,
+                        children=[Element(aria_role="description", control_type=_HEADING, name=platform)],
+                    ),
+                    _described_link(channel),
+                    Element(
+                        aria_role="group",
+                        control_type=_GROUP,
+                        children=[_described_link(title)],
+                    ),
+                    Element(
+                        aria_role="group",
+                        control_type=_GROUP,
+                        children=[
+                            Element(
+                                aria_role="button",
+                                control_type=_BUTTON,
+                                name="Image",
+                                children=[Element(aria_role="img", control_type=_IMAGE, name="Image")],
+                            ),
+                            Element(aria_role="button", control_type=_BUTTON, name="Play"),
+                            Element(
+                                aria_role="link",
+                                control_type=_LINK,
+                                name="Open Link",
+                                children=[Element(aria_role="img", control_type=_IMAGE, name="Open Link")],
+                            ),
+                        ],
+                    ),
+                ],
+            )
+        ],
+    )
+
+
+def discord_message(
+    *,
+    mid,
+    author=None,
+    body="Test",
+    short="1:04 PM",
+    long_form="Saturday, August 29, 2026 1:04 PM",
+    embed=None,
+    article_name=None,
+):
+    """Build one message list item.
+
+    `author=None` models a grouped continuation: Discord drops the header
+    entirely, and the timestamp blocks are hoisted to the top of the article.
+    """
+    body_children = [Element(aria_role="description", control_type=_HEADING, name=body)] if body else []
+    if author is None:
+        article_children = [
+            *_timestamp_blocks(mid, short, long_form),
+            _content_block(mid, body_children),
+        ]
+    else:
+        article_children = [
+            Element(
+                aria_role="heading",
+                control_type=_HEADING,
+                name=f"{author} {short}",
+                children=[
+                    Element(
+                        aria_role="group",
+                        control_type=_GROUP,
+                        automation_id=f"message-username-{mid}",
+                        children=[Element(aria_role="button", control_type=_BUTTON, name=author)],
+                    ),
+                    Element(
+                        aria_role="group",
+                        control_type=_GROUP,
+                        children=_timestamp_blocks(mid, short, long_form),
+                    ),
+                ],
+            ),
+            _content_block(mid, body_children),
+        ]
+    if embed is not None:
+        article_children.append(embed)
+
+    if article_name is None:
+        article_name = f"{author or 'someone'} , {body} , {short}"
+    article = Element(
+        aria_role="article",
+        control_type=_GROUP,
+        name=article_name,
+        children=article_children,
+    )
+    return Element(
+        aria_role="listitem",
+        control_type=_LIST_ITEM,
+        runtime_id=(2, int(mid)),
+        name=f"{author or ''}{short}{long_form}{body}",
+        children=[article],
+    )
+
+
+def texts_for(app_module, items):
+    root, _document = make_tree("https://discord.com/channels/1/2", items)
+    _uia, foreground = install_uia(root)
+    snapshot = app_module._getSnapshotViaUIA(foreground)
+    return [message.text for message in snapshot.messages]
+
+
+class TestStructuralTextComposition:
+    """Compose announcement text from Discord's own labelled message parts."""
+
+    def test_composes_author_and_body_dropping_both_timestamps(self, app_module):
+        items = [discord_message(mid="1", author="blindndangerous", body="Test")]
+
+        assert texts_for(app_module, items) == ["blindndangerous, Test"]
+
+    def test_drops_hidden_long_form_timestamp(self, app_module):
+        """The long form is marked offscreen; it must never reach speech."""
+        items = [
+            discord_message(
+                mid="1",
+                author="Bryn",
+                body="hello",
+                long_form="Friday, August 28, 2026 11:53 PM",
+            )
+        ]
+
+        (text,) = texts_for(app_module, items)
+
+        assert "Friday" not in text
+        assert "August" not in text
+
+    def test_drops_visible_short_timestamp_by_automation_id(self, app_module):
+        items = [discord_message(mid="1", author="Bryn", body="hello", short="11:53 PM")]
+
+        (text,) = texts_for(app_module, items)
+
+        assert "11:53" not in text
+        assert text == "Bryn, hello"
+
+    def test_carries_author_across_a_grouped_run(self, app_module):
+        """Discord omits the header on consecutive messages from one author."""
+        items = [
+            discord_message(mid="1", author="acerbt", body="first"),
+            discord_message(mid="2", author=None, body="second"),
+            discord_message(mid="3", author=None, body="third"),
+        ]
+
+        assert texts_for(app_module, items) == [
+            "acerbt, first",
+            "acerbt, second",
+            "acerbt, third",
+        ]
+
+    def test_new_author_ends_the_grouped_run(self, app_module):
+        items = [
+            discord_message(mid="1", author="acerbt", body="first"),
+            discord_message(mid="2", author=None, body="second"),
+            discord_message(mid="3", author="Bryn", body="third"),
+            discord_message(mid="4", author=None, body="fourth"),
+        ]
+
+        assert texts_for(app_module, items) == [
+            "acerbt, first",
+            "acerbt, second",
+            "Bryn, third",
+            "Bryn, fourth",
+        ]
+
+    def test_leading_continuation_stays_unattributed_rather_than_guessing(self, app_module):
+        """A run whose author sits above the snapshot window has no author to use."""
+        items = [
+            discord_message(mid="1", author=None, body="orphaned"),
+            discord_message(mid="2", author="Bryn", body="named"),
+        ]
+
+        assert texts_for(app_module, items) == ["orphaned", "Bryn, named"]
+
+    def test_keeps_embed_content_and_drops_embed_chrome(self, app_module):
+        items = [
+            discord_message(
+                mid="1",
+                author="blindndangerous",
+                body="https://youtu.be/rKtRpLqd240",
+                embed=youtube_embed(),
+            )
+        ]
+
+        (text,) = texts_for(app_module, items)
+
+        assert text == ("blindndangerous, https://youtu.be/rKtRpLqd240, YouTube, wavywebsurf, Why This Mascot Punched")
+        for chrome in ("Remove all embeds", "Play", "Open Link", "Image"):
+            assert chrome not in text
+
+    def test_embed_chrome_dropped_on_grouped_message_too(self, app_module):
+        items = [
+            discord_message(mid="1", author="blindndangerous", body="first"),
+            discord_message(mid="2", author=None, body="https://youtu.be/x", embed=youtube_embed()),
+        ]
+
+        second = texts_for(app_module, items)[1]
+
+        assert second.startswith("blindndangerous, https://youtu.be/x, YouTube")
+        assert "Remove all embeds" not in second
+
+    def test_falls_back_to_article_name_when_no_parts_are_labelled(self, app_module):
+        """If Discord drops the labelled parts, its own summary beats saying nothing."""
+        article = Element(
+            aria_role="article",
+            control_type=_GROUP,
+            name="Bryn , unlabelled shape , 11:53 PM",
+        )
+        item = Element(aria_role="listitem", runtime_id=(2, 1), children=[article])
+
+        assert texts_for(app_module, [item]) == ["Bryn , unlabelled shape , 11:53 PM"]
+
+    def test_message_without_a_text_body_uses_discord_summary(self, app_module):
+        """An attachment-only message has no content element; the article name still describes it."""
+        items = [
+            discord_message(
+                mid="1",
+                author="Bryn",
+                body="",
+                article_name="Bryn , image.png , 1:04 PM",
+            )
+        ]
+
+        assert texts_for(app_module, items) == ["Bryn , image.png , 1:04 PM"]
+
+    def test_deeply_nested_body_is_still_reached(self, app_module):
+        deep = Element(aria_role="description", control_type=_HEADING, name="buried")
+        for _ in range(5):
+            deep = Element(aria_role="group", control_type=_GROUP, children=[deep])
+        article = Element(
+            aria_role="article",
+            control_type=_GROUP,
+            name="fallback",
+            children=[
+                Element(
+                    aria_role="group",
+                    control_type=_GROUP,
+                    automation_id="message-content-1",
+                    children=[deep],
+                )
+            ],
+        )
+        item = Element(aria_role="listitem", runtime_id=(2, 1), children=[article])
+
+        assert texts_for(app_module, [item]) == ["buried"]
+
+    def test_walk_is_bounded_against_pathological_depth(self, app_module):
+        """A runaway tree must fall back, not stall the 500ms poll."""
+        deep = Element(aria_role="description", control_type=_HEADING, name="too deep")
+        for _ in range(40):
+            deep = Element(aria_role="group", control_type=_GROUP, children=[deep])
+        article = Element(aria_role="article", control_type=_GROUP, name="bounded fallback", children=[deep])
+        item = Element(aria_role="listitem", runtime_id=(2, 1), children=[article])
+
+        assert texts_for(app_module, [item]) == ["bounded fallback"]
+
+    def test_author_falls_back_to_a_named_descendant(self, app_module):
+        """The username element is a wrapper; the name sits on a button inside it."""
+        article = Element(
+            aria_role="article",
+            control_type=_GROUP,
+            name="fallback",
+            children=[
+                Element(
+                    aria_role="group",
+                    control_type=_GROUP,
+                    automation_id="message-username-1",
+                    children=[
+                        Element(
+                            aria_role="group",
+                            control_type=_GROUP,
+                            children=[Element(control_type=_BUTTON, name="NestedName")],
+                        )
+                    ],
+                ),
+                _content_block("1", [Element(aria_role="description", control_type=_HEADING, name="hi")]),
+            ],
+        )
+        item = Element(aria_role="listitem", runtime_id=(2, 1), children=[article])
+
+        assert texts_for(app_module, [item]) == ["NestedName, hi"]
+
+
+class TestStructuralEdgePaths:
+    """Bounded-walk and parsing paths that only appear on malformed trees."""
+
+    def test_author_lookup_gives_up_when_nothing_is_named(self, app_module):
+        """A username wrapper whose whole subtree is unnamed yields no author."""
+        article = Element(
+            aria_role="article",
+            control_type=_GROUP,
+            name="fallback",
+            children=[
+                Element(
+                    aria_role="group",
+                    control_type=_GROUP,
+                    automation_id="message-username-1",
+                    children=[
+                        Element(aria_role="group", control_type=_GROUP),
+                        Element(aria_role="group", control_type=_GROUP),
+                    ],
+                ),
+                _content_block("1", [Element(aria_role="description", control_type=_HEADING, name="hi")]),
+            ],
+        )
+        item = Element(aria_role="listitem", runtime_id=(2, 1), children=[article])
+
+        assert texts_for(app_module, [item]) == ["hi"]
+
+    def test_author_lookup_stops_at_the_depth_bound(self, app_module):
+        """A username subtree deeper than the bound must not be searched forever."""
+        deep = Element(control_type=_BUTTON, name="TooDeepToUse")
+        for _ in range(20):
+            deep = Element(aria_role="group", control_type=_GROUP, children=[deep])
+        article = Element(
+            aria_role="article",
+            control_type=_GROUP,
+            name="fallback",
+            children=[
+                Element(
+                    aria_role="group",
+                    control_type=_GROUP,
+                    automation_id="message-username-1",
+                    children=[deep],
+                ),
+                _content_block("1", [Element(aria_role="description", control_type=_HEADING, name="hi")]),
+            ],
+        )
+        item = Element(aria_role="listitem", runtime_id=(2, 1), children=[article])
+
+        assert texts_for(app_module, [item]) == ["hi"]
+
+    def test_list_item_with_no_named_descendant_is_skipped(self, app_module):
+        """No article, no name, no named child: there is nothing to announce."""
+        item = Element(
+            aria_role="listitem",
+            runtime_id=(2, 1),
+            children=[
+                Element(aria_role="group", control_type=_GROUP),
+                Element(aria_role="group", control_type=_GROUP),
+            ],
+        )
+
+        assert texts_for(app_module, [item]) == []
+
+    @pytest.mark.parametrize("value", [None, 1234, b"https://discord.com/channels/1/2"])
+    def test_channel_identity_rejects_non_string_values(self, app_module, value):
+        assert app_module._channelIdentity(value) is None
+
+    def test_channel_identity_rejects_unparseable_urls(self, app_module):
+        """urlsplit raises on a malformed IPv6 literal rather than returning a result."""
+        assert app_module._channelIdentity("https://[::1/channels/1/2") is None

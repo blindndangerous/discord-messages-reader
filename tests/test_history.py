@@ -3,6 +3,8 @@
 import sys
 from unittest.mock import MagicMock
 
+import pytest
+
 from discord import ChannelSnapshot, MessageEntry
 
 
@@ -97,3 +99,24 @@ class TestGestureRegistration:
 
         assert gestures["kb:NVDA+alt+shift+d"] == "toggleAnnounce"
         assert "kb:NVDA+control+shift+d" not in gestures
+
+
+class TestReadMessageGestures:
+    """Each alt+N gesture must map to the matching Nth-last message."""
+
+    @pytest.mark.parametrize(
+        ("script_index", "expected_n"),
+        [(1, 1), (2, 2), (3, 3), (4, 4), (5, 5), (6, 6), (7, 7), (8, 8), (9, 9), (10, 10)],
+    )
+    def test_script_reads_the_matching_message(self, app_module, mocker, script_index, expected_n):
+        read = mocker.patch.object(app_module, "_readNthLastMessage")
+
+        getattr(app_module, f"script_readMessage{script_index}")(None)
+
+        read.assert_called_once_with(expected_n)
+
+    def test_alt_zero_is_bound_to_the_tenth_message(self, app_module):
+        gestures = app_module._AppModule__gestures
+
+        assert gestures["kb:alt+0"] == "readMessage10"
+        assert gestures["kb:alt+1"] == "readMessage1"
