@@ -13,8 +13,6 @@ import build as build_module
 
 REQUIRED_ARCHIVE_FILES = [
     "LICENSE",
-    "README.md",
-    "THREAT_MODEL.md",
     "appModules/discord/__init__.py",
     "appModules/discordcanary/__init__.py",
     "appModules/discordptb/__init__.py",
@@ -217,3 +215,29 @@ def test_interrupted_rebuild_preserves_final_archive_and_removes_temporary_file(
 
     assert archive_path.read_bytes() == original_archive
     assert list((tmp_path / "dist").glob("*.tmp")) == []
+
+
+@pytest.mark.parametrize("version", ["2.2.0-beta.1", "2.2.0+build.5", "2", "02.1.0"])
+def test_build_rejects_versions_the_add_on_store_would_reject(tmp_path: Path, version: str) -> None:
+    _create_project(tmp_path)
+    manifest = f"name = discord_messages_reader\nversion = {version}\n"
+    (tmp_path / "manifest.ini").write_text(manifest, encoding="utf-8")
+
+    with pytest.raises(ValueError, match=r"unsafe version"):
+        build_module.build(tmp_path)
+
+
+def test_real_manifest_meets_nvda_and_store_rules() -> None:
+    """NVDA's configobj splits an unquoted value at commas, which makes the manifest invalid."""
+    import tomllib
+
+    lines = (build_module.PROJECT_ROOT / "manifest.ini").read_text(encoding="utf-8").splitlines()
+    manifest = dict(line.split(" = ", 1) for line in lines if " = " in line)
+    required = {"name", "summary", "description", "author", "version", "url", "docFileName"}
+    assert required <= manifest.keys()
+    for key in ("summary", "description"):
+        assert manifest[key].startswith('"') and manifest[key].endswith('"'), key
+    assert (build_module.PROJECT_ROOT / "doc" / "en" / manifest["docFileName"]).is_file()
+    version = build_module.read_version()
+    pyproject = tomllib.loads((build_module.PROJECT_ROOT / "pyproject.toml").read_text(encoding="utf-8"))
+    assert pyproject["project"]["version"] == version

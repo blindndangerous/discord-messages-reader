@@ -6,6 +6,58 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Fixed
+
+- NVDA no longer lags while Discord is in the foreground. Every poll, twice a
+  second, re-read the full accessibility subtree of every visible message on
+  NVDA's main thread: thousands of cross-process calls that held up speech,
+  braille and keyboard input. A poll now walks back from the newest message and
+  stops at the last one it already knows, so a quiet channel costs a handful of
+  calls. Message list items are remembered by their UIA runtime ID and read
+  again only when their content changes.
+- The Friends page, settings and other pages without a channel no longer search
+  the whole Discord window on every poll. Discord's document stays cached there,
+  and repeated failed searches back off to one every four seconds.
+- Alt+1 through Alt+0 read only the messages they need instead of the whole
+  window. Edits and late embeds are still heard.
+- Opening or switching channels no longer freezes NVDA for half a second.
+  Baselines read only recent messages, and discovery finds Discord's message
+  list directly instead of searching the whole window. Measured on NVDA 2026.2:
+  a cold channel baseline went from about 810 ms to about 100 ms.
+- Messages are identified by Discord's own message IDs. A new message is no
+  longer lost when the previous newest message is deleted at the same moment,
+  or when Discord re-renders a message, or when someone else posts while your
+  own message is being sent.
+- Your own message is announced once. Before, Discord replacing the message
+  being sent with the delivered one forced a silent baseline that could swallow
+  someone else's message.
+- History is never announced as new: a message more than a minute old by its
+  Discord timestamp stays silent, whether you scrolled to it, opened it from a
+  link, or the add-on had forgotten the channel.
+- Nothing is announced while NVDA is in sleep mode for Discord.
+- Alt+1 through Alt+0 and the toggle speak in NVDA's on-demand speech mode.
+
+### Changed
+
+- Commands use NVDA's `@script` decorator, and every user-facing string is
+  ready for translation.
+- The add-on package no longer includes the developer README and threat model.
+- Release versions must be `major.minor` or `major.minor.patch`, as the NVDA
+  Add-on Store requires.
+- Tested with NVDA 2026.2.
+
+### Security
+
+- The release secret scan now scans. Releases call the security workflow on
+  a tag push, where gitleaks-action logs "No commits to scan" and passes. The
+  job now runs the checksum-verified Gitleaks CLI over the full history on
+  every event, and `scripts/check.ps1` runs it locally too.
+- Release notes and `SECURITY.md` no longer promise a detached `.sig` per
+  asset. Cosign 3 writes the signature into the `.bundle` and never produced
+  one. The verification example also accepts two-part version tags.
+- Renovate's pre-commit manager is enabled; it is off by default, so hook
+  revisions were never updated.
+
 ---
 
 ## [2.1.0] - 2026-08-29

@@ -32,6 +32,7 @@ def _install_stubs():
 
     class _BaseAppModule:
         processID: int = 9999
+        sleepMode: bool = False
 
         def __init__(self, *args, **kwargs):
             pass
@@ -40,6 +41,33 @@ def _install_stubs():
             pass
 
     m.AppModule = _BaseAppModule
+
+    # addonHandler: initTranslation binds gettext functions into the caller's
+    # globals, exactly as NVDA's does, so module code can use _() and ngettext().
+    m = _stub("addonHandler")
+
+    def _init_translation():
+        caller = sys._getframe(1).f_globals
+        caller["_"] = lambda text: text
+        caller["ngettext"] = lambda singular, plural, count: singular if count == 1 else plural
+
+    m.initTranslation = _init_translation
+
+    # scriptHandler: the decorator records its arguments on the function, as
+    # NVDA's does, and NVDA's ScriptableType turns `gestures` into bindings.
+    m = _stub("scriptHandler")
+
+    def _script(description="", category=None, gesture=None, gestures=None, speakOnDemand=False, **_kwargs):
+        def decorate(function):
+            function.__doc__ = description
+            function.category = category
+            function.gestures = [*(gestures or ()), *([gesture] if gesture else [])]
+            function.speakOnDemand = speakOnDemand
+            return function
+
+        return decorate
+
+    m.script = _script
 
     # logHandler
     m = _stub("logHandler")
