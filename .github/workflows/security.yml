@@ -66,7 +66,19 @@ jobs:
         with:
           persist-credentials: false
           fetch-depth: 0
-      - name: Gitleaks scan
-        uses: gitleaks/gitleaks-action@ff98106e4c7b2bc287b24eaf42907196329070c7 # v2.3.9
+      # The CLI, not gitleaks-action: on a tag push the event carries no
+      # commits, so the action logs "No commits to scan" and passes without
+      # scanning. The release workflow calls this job on tag pushes, so it
+      # scans the whole history on every event instead.
+      - name: Install Gitleaks
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITLEAKS_VERSION: 8.30.1
+          GITLEAKS_SHA256: 551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb
+        run: |
+          archive="gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
+          curl -fsSL -o "$RUNNER_TEMP/$archive" \
+            "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/${archive}"
+          echo "${GITLEAKS_SHA256}  $RUNNER_TEMP/$archive" | sha256sum --check --strict
+          tar -xzf "$RUNNER_TEMP/$archive" -C "$RUNNER_TEMP" gitleaks
+      - name: Gitleaks scan
+        run: '"$RUNNER_TEMP/gitleaks" git --redact --verbose --exit-code 1 .'

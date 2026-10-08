@@ -23,7 +23,8 @@ You can expect:
 ## Verifying release assets
 
 Releases produced by the hardened release workflow include the add-on, two SBOM
-files, `SHA256SUMS`, and a Sigstore bundle and detached signature for each file.
+files, `SHA256SUMS`, and a Sigstore bundle (`.bundle`) for each file. The bundle
+holds the signature and signing certificate; there is no separate `.sig` file.
 Older releases may not include these files.
 
 Install Cosign, download the release assets, and verify the checksum manifest:
@@ -31,7 +32,7 @@ Install Cosign, download the release assets, and verify the checksum manifest:
 ```powershell
 cosign verify-blob `
   --bundle SHA256SUMS.bundle `
-  --certificate-identity-regexp '^https://github\.com/blindndangerous/discord-messages-reader/\.github/workflows/release\.yml@refs/tags/v[0-9]+\.[0-9]+\.[0-9]+$' `
+  --certificate-identity-regexp '^https://github\.com/blindndangerous/discord-messages-reader/\.github/workflows/release\.yml@refs/tags/v[0-9]+\.[0-9]+(\.[0-9]+)?$' `
   --certificate-oidc-issuer 'https://token.actions.githubusercontent.com' `
   SHA256SUMS
 ```

@@ -46,6 +46,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   Add-on Store requires.
 - Tested with NVDA 2026.2.
 
+### Security
+
+- The release secret scan now scans. Releases call the security workflow on
+  a tag push, where gitleaks-action logs "No commits to scan" and passes. The
+  job now runs the checksum-verified Gitleaks CLI over the full history on
+  every event, and `scripts/check.ps1` runs it locally too.
+- Release notes and `SECURITY.md` no longer promise a detached `.sig` per
+  asset. Cosign 3 writes the signature into the `.bundle` and never produced
+  one. The verification example also accepts two-part version tags.
+- Renovate's pre-commit manager is enabled; it is off by default, so hook
+  revisions were never updated.
+
 ---
 
 ## [2.1.0] - 2026-08-29

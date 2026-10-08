@@ -10,7 +10,7 @@
     everything that is broken. A summary table is printed at the end and the
     script exits non-zero if any check failed.
 
-    External scanners (osv-scanner) are looked up on PATH. No tool
+    External scanners (osv-scanner, gitleaks) are looked up on PATH. No tool
     version is pinned here on purpose: the local run always uses whatever is
     installed. If a scanner is missing the check is reported as SKIPPED with a
     loud, explicit banner -- it is never skipped silently.
@@ -149,6 +149,10 @@ Invoke-Check -Name 'zizmor' `
 Invoke-Check -Name 'osv-scanner' `
     -Executable 'osv-scanner' -CommandArgs @('scan', 'source', '--lockfile=uv.lock', '--config=osv-scanner.toml') `
     -InstallHint 'winget install Google.OSVScanner'
+
+Invoke-Check -Name 'gitleaks' `
+    -Executable 'gitleaks' -CommandArgs @('git', '--redact', '--exit-code', '1', '.') `
+    -InstallHint 'winget install Gitleaks.Gitleaks'
 
 # --- Summary ------------------------------------------------------------
 $passed = @($Results | Where-Object { $_.Status -eq 'PASS' }).Count
