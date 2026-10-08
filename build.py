@@ -17,8 +17,6 @@ PROJECT_ROOT = Path(__file__).resolve().parent
 # Stored in lexical order so archive member order is stable.
 INCLUDED_FILES = (
     "LICENSE",
-    "README.md",
-    "THREAT_MODEL.md",
     "appModules/discord/__init__.py",
     "appModules/discordcanary/__init__.py",
     "appModules/discordptb/__init__.py",
@@ -30,11 +28,9 @@ INCLUDED_FILES = (
 _DIST = "dist"
 _ZIP_TIMESTAMP = (1980, 1, 1, 0, 0, 0)
 _ZIP_MODE = stat.S_IFREG | 0o644
-_VERSION_RE = re.compile(
-    r"(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)"
-    r"(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?"
-    r"(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?"
-)
+# The NVDA Add-on Store accepts only major.minor or major.minor.patch; anything
+# else would build and sign, then fail store validation.
+_VERSION_RE = re.compile(r"(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)(?:\.(?:0|[1-9]\d*))?")
 
 
 def _validated_archive_path(archive_name: str) -> PurePosixPath:
