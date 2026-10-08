@@ -4,7 +4,7 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
-## [Unreleased]
+## [2.2.0] - 2026-10-08
 
 ### Fixed
 
@@ -13,8 +13,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   NVDA's main thread: thousands of cross-process calls that held up speech,
   braille and keyboard input. A poll now walks back from the newest message and
   stops at the last one it already knows, so a quiet channel costs a handful of
-  calls. Message list items are remembered by their UIA runtime ID and read
-  again only when their content changes.
+  calls. Parsed messages are remembered and read again only when their
+  content changes. Measured on NVDA 2026.2: a quiet poll went from about
+  500 ms to about 2 ms.
 - The Friends page, settings and other pages without a channel no longer search
   the whole Discord window on every poll. Discord's document stays cached there,
   and repeated failed searches back off to one every four seconds.
