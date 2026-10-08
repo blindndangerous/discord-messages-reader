@@ -90,6 +90,24 @@ class Element:
             raise OSError("runtime ID unavailable")
         return self.runtime_id
 
+    def FindFirst(self, scope, condition):
+        """First match in tree order, searched through FindAll so tests can count searches."""
+        _kind, property_id, expected = condition
+        if property_id == _ARIA_ROLE:
+            candidates = [getattr(self, "main", None), *(a for item in self.lists for a in _ancestors(item))]
+            for candidate in candidates:
+                if candidate is not None and str(candidate.properties[_ARIA_ROLE]).casefold() == expected:
+                    candidate.window = self
+                    return candidate
+            return None
+        window = getattr(self, "window", self)
+        found = window.FindAll(scope, condition)
+        for index in range(found.Length if found else 0):
+            element = found.GetElement(index)
+            if window is self or self in _ancestors(element):
+                return element
+        return None
+
     def FindAll(self, _scope, condition):
         _kind, property_id, expected = condition
         if property_id == _CONTROL_TYPE and expected == _DOCUMENT:
@@ -97,6 +115,13 @@ class Element:
         if property_id == _CONTROL_TYPE and expected == _LIST:
             return ElementArray(self.lists)
         return ElementArray([])
+
+
+def _ancestors(element):
+    ancestor = element.parent
+    while ancestor is not None:
+        yield ancestor
+        ancestor = ancestor.parent
 
 
 class RawViewWalker:
@@ -143,6 +168,7 @@ def make_tree(channel_url, messages, *, document_runtime=(1, 10)):
     message_list = Element(control_type=_LIST, children=messages)
     message_list.parent = main
     main.parent = root
+    root.main = main
     root.messages = message_list.children
     root.lists = [message_list]
     root.documents = [document]
@@ -152,6 +178,11 @@ def make_tree(channel_url, messages, *, document_runtime=(1, 10)):
 def install_uia(root):
     uia = MagicMock()
     uia.CreatePropertyCondition.side_effect = lambda property_id, expected: (
+        "property",
+        property_id,
+        expected,
+    )
+    uia.CreatePropertyConditionEx.side_effect = lambda property_id, expected, _flags: (
         "property",
         property_id,
         expected,

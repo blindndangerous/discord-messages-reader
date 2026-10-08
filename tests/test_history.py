@@ -15,6 +15,16 @@ def current_snapshot(*texts):
     )
 
 
+def bound_gestures(app_module):
+    """Gesture bindings as NVDA's ScriptableType builds them from @script."""
+    return {
+        gesture: name.removeprefix("script_")
+        for name, function in vars(type(app_module)).items()
+        if name.startswith("script_")
+        for gesture in getattr(function, "gestures", ())
+    }
+
+
 def make_foreground(app_module):
     foreground = MagicMock(windowHandle=1)
     foreground.appModule = app_module
@@ -53,7 +63,7 @@ class TestHistoryReading:
 
         app_module._readNthLastMessage(5)
 
-        sys.modules["ui"].message.assert_called_once_with("Message 5 not available")
+        sys.modules["ui"].message.assert_called_once_with("Message 5 is not available")
 
     def test_does_nothing_outside_foreground_discord(self, app_module):
         sys.modules["api"].getForegroundObject.return_value = None
@@ -80,7 +90,7 @@ class TestHistoryReading:
         app_module._readNthLastMessage(1)
 
         assert app_module._channelSnapshots == {}
-        app_module._getSnapshotViaUIA.assert_called_once_with(foreground)
+        app_module._getSnapshotViaUIA.assert_called_once_with(foreground, history=1)
 
 
 class TestGestureRegistration:
@@ -89,16 +99,24 @@ class TestGestureRegistration:
             assert hasattr(app_module, f"script_readMessage{index}")
 
     def test_alt_digit_gestures_are_preserved(self, app_module):
-        gestures = app_module.__class__.__dict__["_AppModule__gestures"]
+        gestures = bound_gestures(app_module)
 
         assert gestures["kb:alt+1"] == "readMessage1"
         assert gestures["kb:alt+0"] == "readMessage10"
 
     def test_toggle_gesture_is_preserved(self, app_module):
-        gestures = app_module.__class__.__dict__["_AppModule__gestures"]
+        gestures = bound_gestures(app_module)
 
         assert gestures["kb:NVDA+alt+shift+d"] == "toggleAnnounce"
         assert "kb:NVDA+control+shift+d" not in gestures
+
+    def test_every_command_speaks_in_on_demand_speech_mode(self, app_module):
+        """NVDA's on-demand mode silences scripts not marked speakOnDemand."""
+        scripts = [getattr(type(app_module), f"script_{name}") for name in bound_gestures(app_module).values()]
+
+        assert len(scripts) == 11
+        assert all(script.speakOnDemand for script in scripts)
+        assert all(script.__doc__ for script in scripts)
 
 
 class TestReadMessageGestures:
@@ -116,7 +134,7 @@ class TestReadMessageGestures:
         read.assert_called_once_with(expected_n)
 
     def test_alt_zero_is_bound_to_the_tenth_message(self, app_module):
-        gestures = app_module._AppModule__gestures
+        gestures = bound_gestures(app_module)
 
         assert gestures["kb:alt+0"] == "readMessage10"
         assert gestures["kb:alt+1"] == "readMessage1"

@@ -28,7 +28,7 @@ source = ["appModules"]
 omit = ["appModules/discordptb/*", "appModules/discordcanary/*"]
 
 [tool.coverage.report]
-fail_under = 97
+fail_under = 98
 show_missing = true
 
 [tool.ruff]
@@ -36,6 +36,8 @@ show_missing = true
 # Ruff's formatter is not run on appModules/ — tabs must be preserved.
 line-length = 120
 target-version = "py313"
+# NVDA's addonHandler.initTranslation() binds these into module globals at run time.
+builtins = ["_", "ngettext"]
 
 [tool.ruff.lint]
 select = [
