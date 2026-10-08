@@ -13,7 +13,7 @@ Announcements use NVDA's standard message API, so they are presented through bot
 
 ## Requirements
 
-- NVDA 2026.1 (tested with NVDA 2026.1.1)
+- NVDA 2026.1 or later (tested with NVDA 2026.2)
 - Discord (stable, PTB, or Canary builds)
 - A Windows version supported by NVDA 2026.1
 
@@ -49,6 +49,10 @@ All gestures appear under **Discord Messages Reader** in NVDA's Input Gestures d
 - Messages are announced up to 500 milliseconds after they appear in Discord's UI, which is the polling interval.
 - Only messages currently exposed in Discord's UIA tree can be detected. Messages virtualized out of the visible accessibility tree are unavailable to the add-on.
 - Automatic announcements only occur while Discord is the foreground application. Returning to Discord establishes a silent baseline so older messages are not mistaken for new arrivals. Use `Alt+1` through `Alt+0` to review currently exposed messages.
+- A burst of more than 10 new messages is announced as the first 10 followed by "N more messages". Each message is cut to 500 characters. Use `Alt+1` through `Alt+0` to review them.
+- A message whose Discord timestamp is more than a minute old is never announced, so history you scroll to, open from a link, or that Discord loads after a reconnect stays silent.
+- Your own messages are announced once, when you send them.
+- Nothing is announced while NVDA is in sleep mode for Discord. In NVDA's on-demand speech mode, automatic announcements appear in braille only; `Alt+1` through `Alt+0` and the toggle still speak.
 - Discord UI updates can change its accessibility structure. Please report regressions with the Discord and NVDA versions, but redact private content from logs before attaching them.
 
 ## Supported Discord Builds

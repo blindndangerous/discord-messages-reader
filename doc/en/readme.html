@@ -12,7 +12,7 @@
 <h2>Requirements</h2>
 
 <ul>
-<li>NVDA 2026.1 (tested with NVDA 2026.1.1)</li>
+<li>NVDA 2026.1 or later (tested with NVDA 2026.2)</li>
 <li>A Windows version supported by NVDA 2026.1</li>
 <li>Discord stable, PTB, or Canary</li>
 </ul>
@@ -35,6 +35,13 @@
 <h2>Limitations and privacy</h2>
 
 <p>The add-on can read only messages currently exposed in Discord's accessibility tree. Discord updates can change that tree and temporarily affect detection.</p>
+
+<ul>
+<li>A burst of more than 10 new messages is announced as the first 10 followed by the number of messages left out. Each message is cut to 500 characters. Alt+1 through Alt+0 review them.</li>
+<li>A message whose Discord timestamp is more than a minute old is never announced, so history you scroll to, open from a link, or that Discord loads after a reconnect stays silent.</li>
+<li>Your own messages are announced once, when you send them.</li>
+<li>Nothing is announced while NVDA is in sleep mode for Discord. In NVDA's on-demand speech mode, automatic announcements appear in braille only; Alt+1 through Alt+0 and the toggle still speak.</li>
+</ul>
 
 <p>Speech can disclose private messages to nearby people. Use NVDA+Alt+Shift+D when you do not want automatic announcements. Before sharing an NVDA log in a bug report, remove Discord message text, usernames, channel names, tokens, local paths, email addresses, and other private data.</p>
 </body>
