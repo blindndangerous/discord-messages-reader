@@ -117,7 +117,8 @@ jobs:
     needs: verify-tag
     permissions:
       contents: read
-    uses: ./.github/workflows/security.yml
+    # actionlint does not accept the $/ self-repository syntax yet.
+    uses: ./.github/workflows/security.yml # zizmor: ignore[self-repository]
 
   build:
     name: Build reproducible .nvda-addon
