@@ -50,6 +50,19 @@
         "dependencies",
         "github-actions"
       ]
+    },
+    {
+      "description": "Merge minor, patch, pin, digest and lock-file updates once the checks pass. Majors wait for review.",
+      "matchUpdateTypes": [
+        "minor",
+        "patch",
+        "pin",
+        "pinDigest",
+        "digest",
+        "lockFileMaintenance"
+      ],
+      "automerge": true,
+      "automergeType": "pr"
     }
   ]
 }
