@@ -240,7 +240,7 @@ dev = [
     { name = "pip-audit", specifier = ">=2.10.1" },
     { name = "pre-commit", specifier = ">=4.7.0" },
     { name = "pytest", specifier = ">=9.2.0" },
-    { name = "pytest-cov", specifier = ">=5.0.0" },
+    { name = "pytest-cov", specifier = ">=7.1.0" },
     { name = "pytest-mock", specifier = ">=3.14.0" },
     { name = "ruff", specifier = ">=0.15.10" },
     { name = "zizmor", specifier = ">=1.29.0" },
