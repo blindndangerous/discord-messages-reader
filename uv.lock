@@ -237,7 +237,7 @@ dev = [
 dev = [
     { name = "bandit", specifier = ">=1.9.4" },
     { name = "mypy", specifier = ">=2.4.1" },
-    { name = "pip-audit", specifier = ">=2.10.0" },
+    { name = "pip-audit", specifier = ">=2.10.1" },
     { name = "pre-commit", specifier = ">=4.0.0" },
     { name = "pytest", specifier = ">=8.0.0" },
     { name = "pytest-cov", specifier = ">=5.0.0" },
