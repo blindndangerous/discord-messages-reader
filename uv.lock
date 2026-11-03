@@ -242,7 +242,7 @@ dev = [
     { name = "pytest", specifier = ">=9.2.0" },
     { name = "pytest-cov", specifier = ">=7.1.0" },
     { name = "pytest-mock", specifier = ">=3.17.0" },
-    { name = "ruff", specifier = ">=0.15.10" },
+    { name = "ruff", specifier = ">=0.17.3" },
     { name = "zizmor", specifier = ">=1.29.0" },
 ]
 
