@@ -37,7 +37,7 @@ repos:
   # for workflow vulnerabilities such as credential persistence and cache
   # poisoning, which actionlint does not look for.
   - repo: https://github.com/zizmorcore/zizmor-pre-commit
-    rev: v1.31.1
+    rev: v1.32.0
     hooks:
       - id: zizmor
 
